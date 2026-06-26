@@ -11,7 +11,7 @@ alter table checklist_items add column category checklist_category;
 update checklist_items set category = case
   when stage in ('admission_surgery') then 'clinical'
   else 'admin'
-end;
+end::checklist_category;
 
 alter table checklist_items alter column category set not null;
 alter table checklist_items drop column stage;
