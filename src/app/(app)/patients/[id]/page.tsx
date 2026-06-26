@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import { STAGE_LABELS, STAGE_ORDER, type JourneyStage } from "@/lib/checklist";
-import { addClinicalNote, updatePatientBloodsStatus } from "@/app/actions/patients";
-import ChecklistItemRow from "./ChecklistItemRow";
+import { addClinicalNote } from "@/app/actions/patients";
+import ChecklistTabs from "./ChecklistTabs";
+import BloodsStatusSelect from "./BloodsStatusSelect";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
@@ -18,7 +18,7 @@ export default async function PatientDetailPage({
 
   const { data: items } = await supabase
     .from("checklist_items")
-    .select("id, stage, item_key, item_label, completed, sort_order")
+    .select("id, category, item_key, item_label, completed, completed_at, sort_order")
     .eq("patient_id", id)
     .order("sort_order");
 
@@ -27,8 +27,6 @@ export default async function PatientDetailPage({
     .select("id, note, created_at, author_id, profiles(full_name)")
     .eq("patient_id", id)
     .order("created_at", { ascending: false });
-
-  const itemsByStage = (stage: JourneyStage) => items?.filter((i) => i.stage === stage) ?? [];
 
   return (
     <div className="space-y-6">
@@ -56,35 +54,10 @@ export default async function PatientDetailPage({
 
       <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center gap-3">
         <span className="text-sm font-medium">Bloods status:</span>
-        <form action={async (formData) => {
-          "use server";
-          await updatePatientBloodsStatus(id, String(formData.get("bloods_status")));
-        }}>
-          <select
-            name="bloods_status"
-            defaultValue={patient.bloods_status}
-            onChange={(e) => e.target.form?.requestSubmit()}
-            className="rounded-md border border-gray-300 px-2 py-1 text-sm"
-          >
-            <option value="pending">Pending</option>
-            <option value="ordered">Ordered</option>
-            <option value="received">Received</option>
-          </select>
-        </form>
+        <BloodsStatusSelect patientId={id} status={patient.bloods_status} />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
-        {STAGE_ORDER.map((stage) => (
-          <div key={stage} className="bg-white border border-gray-200 rounded-lg p-4">
-            <h2 className="font-semibold text-brand-teal mb-3">{STAGE_LABELS[stage]}</h2>
-            <ul className="space-y-2">
-              {itemsByStage(stage).map((item) => (
-                <ChecklistItemRow key={item.id} item={item} patientId={id} />
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <ChecklistTabs items={items ?? []} patientId={id} />
 
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <h2 className="font-semibold mb-3">Clinical notes</h2>

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { STAGE_LABELS, STAGE_ORDER, type JourneyStage } from "@/lib/checklist";
+import { CATEGORY_LABELS, CATEGORY_ORDER, type ChecklistCategory } from "@/lib/checklist";
 import { notFound } from "next/navigation";
 import PrintButton from "./PrintButton";
 
@@ -16,7 +16,7 @@ export default async function ExportPatientPage({
 
   const { data: items } = await supabase
     .from("checklist_items")
-    .select("stage, item_label, completed, sort_order")
+    .select("category, item_label, completed, completed_at, sort_order")
     .eq("patient_id", id)
     .order("sort_order");
 
@@ -26,7 +26,8 @@ export default async function ExportPatientPage({
     .eq("patient_id", id)
     .order("created_at", { ascending: false });
 
-  const itemsByStage = (stage: JourneyStage) => items?.filter((i) => i.stage === stage) ?? [];
+  const itemsByCategory = (category: ChecklistCategory) =>
+    items?.filter((i) => i.category === category) ?? [];
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -53,13 +54,19 @@ export default async function ExportPatientPage({
 
         <div>
           <h2 className="font-semibold mb-2">Journey checklist</h2>
-          {STAGE_ORDER.map((stage) => (
-            <div key={stage} className="mb-3">
-              <p className="font-medium">{STAGE_LABELS[stage]}</p>
+          {CATEGORY_ORDER.map((category) => (
+            <div key={category} className="mb-3">
+              <p className="font-medium">{CATEGORY_LABELS[category]}</p>
               <ul className="list-disc ml-5">
-                {itemsByStage(stage).map((item, i) => (
+                {itemsByCategory(category).map((item, i) => (
                   <li key={i}>
                     {item.completed ? "[x]" : "[ ]"} {item.item_label}
+                    {item.completed && item.completed_at && (
+                      <span className="text-gray-400">
+                        {" "}
+                        ({new Date(item.completed_at).toLocaleDateString("en-AU")})
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
