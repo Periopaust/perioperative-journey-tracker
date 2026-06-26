@@ -83,7 +83,7 @@ create trigger patients_set_updated_at
 
 -- Generic audit trigger: logs insert/update/delete on patients, checklist_items, clinical_notes
 create or replace function audit_row_change()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql security definer set search_path = public as $$
 declare
   actor uuid := auth.uid();
 begin
