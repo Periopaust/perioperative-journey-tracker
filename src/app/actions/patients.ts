@@ -28,7 +28,8 @@ export async function createPatient(formData: FormData) {
     .single();
 
   if (error) {
-    redirect(`/patients/new?error=${encodeURIComponent(error.message)}`);
+    console.error(error);
+    redirect(`/patients/new?error=${encodeURIComponent("Could not create patient. Please try again.")}`);
   }
 
   const items = DEFAULT_CHECKLIST_ITEMS.map((item) => ({
