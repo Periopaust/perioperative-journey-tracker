@@ -34,7 +34,7 @@ export default function ChecklistItemRow({
         </span>
       )}
       {!item.completed && (
-        <span className="text-xs font-medium text-red-500 whitespace-nowrap">outstanding</span>
+        <span className="text-xs font-medium text-rose-500 whitespace-nowrap">outstanding</span>
       )}
     </li>
   );

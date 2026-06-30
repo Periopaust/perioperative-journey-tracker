@@ -17,7 +17,7 @@ export default async function LoginPage({
 
         <form
           action={login}
-          className="bg-white border border-gray-200 rounded-lg shadow-sm p-6 space-y-4"
+          className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-4"
         >
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
@@ -46,7 +46,7 @@ export default async function LoginPage({
           </div>
 
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
               {error}
             </p>
           )}

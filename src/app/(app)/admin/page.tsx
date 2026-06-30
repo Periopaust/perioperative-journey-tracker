@@ -8,7 +8,7 @@ export default async function AdminPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">Admin</h1>
+      <h1 className="text-xl font-semibold tracking-tight text-slate-800">Admin</h1>
       <AdminPurgePanel />
     </div>
   );

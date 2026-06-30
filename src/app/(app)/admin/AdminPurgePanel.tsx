@@ -26,7 +26,7 @@ export default function AdminPurgePanel() {
   }
 
   return (
-    <div className="max-w-lg bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+    <div className="max-w-lg bg-white border border-gray-200 rounded-xl p-6 space-y-4">
       <div>
         <h2 className="font-semibold mb-1">Data retention purge</h2>
         <p className="text-sm text-gray-500">

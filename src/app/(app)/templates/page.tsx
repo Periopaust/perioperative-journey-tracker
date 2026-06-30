@@ -20,10 +20,10 @@ const TEMPLATES = [
 export default function TemplatesPage() {
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">Communication templates</h1>
+      <h1 className="text-xl font-semibold tracking-tight text-slate-800">Communication templates</h1>
       <div className="grid md:grid-cols-2 gap-4">
         {TEMPLATES.map((t) => (
-          <div key={t.title} className="bg-white border border-gray-200 rounded-lg p-4">
+          <div key={t.title} className="bg-white border border-gray-200 rounded-xl p-4">
             <h2 className="font-semibold text-brand-teal mb-2">{t.title}</h2>
             <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">{t.body}</pre>
           </div>

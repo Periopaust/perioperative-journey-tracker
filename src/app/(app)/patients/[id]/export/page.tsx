@@ -35,7 +35,7 @@ export default async function ExportPatientPage({
         <PrintButton />
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-8 space-y-6 text-sm">
+      <div className="bg-white border border-gray-200 rounded-xl p-8 space-y-6 text-sm">
         <div>
           <h1 className="text-lg font-bold text-brand-teal">Perioperative Australia — Patient Summary</h1>
           <p className="text-gray-500">Generated {new Date().toLocaleString("en-AU")}</p>
