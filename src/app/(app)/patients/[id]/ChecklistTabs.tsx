@@ -18,6 +18,11 @@ type Letter = {
   id: string;
   letter_code: string;
   procedure_type: string | null;
+  priority: "routine" | "urgent";
+  letter_to: "doctor" | "patient";
+  recipient_name: string | null;
+  cc: string | null;
+  template: string | null;
   status: "draft" | "reviewed" | "sent";
   docx_path: string | null;
   notes: string | null;

@@ -17,7 +17,7 @@ export default async function PatientDetailPage({
 
   const { data: letters } = await supabase
     .from("letters")
-    .select("id, letter_code, procedure_type, status, docx_path, notes, created_at")
+    .select("id, letter_code, procedure_type, priority, letter_to, recipient_name, cc, template, status, docx_path, notes, created_at")
     .eq("patient_id", id)
     .order("created_at", { ascending: false });
 
@@ -49,7 +49,7 @@ export default async function PatientDetailPage({
         </div>
       </div>
 
-      <LettersPanel patientId={id} letters={letters ?? []} />
+      <LettersPanel patientId={id} referringSurgeon={patient.referring_surgeon} letters={letters ?? []} />
     </div>
   );
 }

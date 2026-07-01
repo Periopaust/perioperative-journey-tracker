@@ -4,7 +4,20 @@ import { createClient } from "@/lib/supabase/server";
 import { letterTextToDocxBuffer } from "@/lib/letter-docx";
 import { revalidatePath } from "next/cache";
 
-export async function saveLetterDraft(patientId: string, letterText: string, procedureType?: string, isPeriopLetter = false) {
+export async function saveLetterDraft(
+  patientId: string,
+  letterText: string,
+  procedureType?: string,
+  isPeriopLetter = false,
+  meta?: {
+    priority?: "routine" | "urgent";
+    letter_to?: "doctor" | "patient";
+    recipient_name?: string;
+    recipient_address?: string;
+    cc?: string;
+    template?: string;
+  }
+) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
@@ -50,6 +63,12 @@ export async function saveLetterDraft(patientId: string, letterText: string, pro
     docx_path: docxPath,
     status: "draft",
     created_by: user.id,
+    priority: meta?.priority || "routine",
+    letter_to: meta?.letter_to || "doctor",
+    recipient_name: meta?.recipient_name || null,
+    recipient_address: meta?.recipient_address || null,
+    cc: meta?.cc || null,
+    template: meta?.template || null,
   });
 
   if (insertError) throw insertError;
