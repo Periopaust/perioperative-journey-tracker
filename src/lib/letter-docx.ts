@@ -61,6 +61,11 @@ function noBorder() {
   return { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
 }
 
+// Actual source dimensions (px):
+//   periop-australia.png  327 × 135  (ratio 2.42 : 1)
+//   bgb.png               226 × 233  (ratio 0.97 : 1)
+//   signature.jpg        1536 × 864  (ratio 1.78 : 1)
+
 function buildLetterhead(isPeriopLetter: boolean): Table {
   const paBuf  = readLogo("periop-australia.png");
   const bgbBuf = readLogo("bgb.png");
@@ -68,28 +73,29 @@ function buildLetterhead(isPeriopLetter: boolean): Table {
   // Left cell
   const leftChildren: (Paragraph)[] = [];
   if (isPeriopLetter) {
-    // PA logo, large, left-aligned
+    // PA logo — large, left-aligned  (327×135 → display 240×99)
     if (paBuf) {
       leftChildren.push(new Paragraph({
-        children: [logoRun(paBuf, "png", 160, 60)],
+        children: [logoRun(paBuf, "png", 240, 99)],
         alignment: AlignmentType.LEFT,
+        spacing: { after: 40 },
       }));
     } else {
       leftChildren.push(new Paragraph({ children: [new TextRun({ text: "Perioperative Australia", bold: true, font: FONT, size: SIZE })] }));
     }
   } else {
-    // BGB logo + address lines
+    // BGB logo — large, left-aligned  (226×233 → display 100×103)
     if (bgbBuf) {
       leftChildren.push(new Paragraph({
-        children: [logoRun(bgbBuf, "png", 70, 70)],
+        children: [logoRun(bgbBuf, "png", 100, 103)],
         alignment: AlignmentType.LEFT,
-        spacing: { after: 60 },
+        spacing: { after: 80 },
       }));
     }
     for (const line of BGB_ADDRESS_LINES) {
       leftChildren.push(new Paragraph({
         children: [new TextRun({ text: line, font: FONT, size: SIZE_TINY, color: "444444" })],
-        spacing: { after: 20 },
+        spacing: { after: 24 },
       }));
     }
   }
@@ -97,26 +103,26 @@ function buildLetterhead(isPeriopLetter: boolean): Table {
   // Right cell
   const rightChildren: (Paragraph)[] = [];
   if (isPeriopLetter) {
-    // BGB logo + address, smaller, right-aligned
+    // BGB logo + address — smaller, right-aligned  (226×233 → display 75×77)
     if (bgbBuf) {
       rightChildren.push(new Paragraph({
-        children: [logoRun(bgbBuf, "png", 55, 55)],
+        children: [logoRun(bgbBuf, "png", 75, 77)],
         alignment: AlignmentType.RIGHT,
-        spacing: { after: 40 },
+        spacing: { after: 60 },
       }));
     }
     for (const line of BGB_ADDRESS_LINES) {
       rightChildren.push(new Paragraph({
         children: [new TextRun({ text: line, font: FONT, size: SIZE_TINY, color: "444444" })],
         alignment: AlignmentType.RIGHT,
-        spacing: { after: 20 },
+        spacing: { after: 24 },
       }));
     }
   } else {
-    // PA logo, right-aligned
+    // PA logo — right-aligned  (327×135 → display 190×78)
     if (paBuf) {
       rightChildren.push(new Paragraph({
-        children: [logoRun(paBuf, "png", 130, 50)],
+        children: [logoRun(paBuf, "png", 190, 78)],
         alignment: AlignmentType.RIGHT,
       }));
     } else {
@@ -167,7 +173,7 @@ function buildSignoff(): (Paragraph)[] {
   if (sigBuf) {
     paras.push(new Paragraph({
       spacing: { before: 160, after: 0 },
-      children: [logoRun(sigBuf, "jpg", 120, 60)],
+      children: [logoRun(sigBuf, "jpg", 160, 90)],
     }));
   } else {
     paras.push(new Paragraph({ text: "", spacing: { before: 480, after: 0 } }));
