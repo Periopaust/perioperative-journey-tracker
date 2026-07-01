@@ -90,6 +90,23 @@ export async function updateLetterStatus(letterId: string, patientId: string, st
   revalidatePath(`/patients/${patientId}`);
 }
 
+export async function deleteLetter(letterId: string, patientId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Get docx path so we can delete from storage too
+  const { data: letter } = await supabase.from("letters").select("docx_path").eq("id", letterId).single();
+  if (letter?.docx_path) {
+    await supabase.storage.from("patient-letters").remove([letter.docx_path]);
+  }
+
+  const { error } = await supabase.from("letters").delete().eq("id", letterId);
+  if (error) throw error;
+
+  revalidatePath(`/patients/${patientId}`);
+}
+
 export async function updateLetterContent(letterId: string, patientId: string, content: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, Upload, Copy, Sparkles, BookMarked, ChevronDown, ChevronUp, FileText } from "lucide-react";
-import { saveLetterDraft, updateLetterStatus, updateLetterContent, addLetterNote, getLetterSignedUrl } from "@/app/actions/letters";
+import { saveLetterDraft, updateLetterStatus, updateLetterContent, deleteLetter, addLetterNote, getLetterSignedUrl } from "@/app/actions/letters";
 import { saveVocabularyCorrection } from "@/app/actions/vocabulary";
 
 type Letter = {
@@ -23,14 +23,14 @@ type Letter = {
 };
 
 const TEMPLATES = [
-  { value: "", label: "— Select template —" },
-  { value: "gp_letter", label: "GP / Referring doctor letter" },
-  { value: "preop", label: "Pre-operative assessment" },
-  { value: "complex_review", label: "Complex review (MBS 132)" },
-  { value: "initial_consult", label: "Initial consult (MBS 110)" },
-  { value: "followup", label: "Follow-up review" },
-  { value: "patient_instructions", label: "Patient instructions" },
-  { value: "medical_certificate", label: "Medical certificate" },
+  { value: "", label: "— Select template —", command: "" },
+  { value: "gp_letter", label: "GP / Referring doctor letter", command: "Write a GP letter to the referring doctor summarising this consultation" },
+  { value: "preop", label: "Pre-operative assessment", command: "Write a pre-operative assessment letter" },
+  { value: "complex_review", label: "Complex review (MBS 132)", command: "Write a complex review letter (MBS item 132)" },
+  { value: "initial_consult", label: "Initial consult (MBS 110)", command: "Write an initial consultation letter (MBS item 110)" },
+  { value: "followup", label: "Follow-up review", command: "Write a follow-up review letter" },
+  { value: "patient_instructions", label: "Patient instructions", command: "Write patient instructions summarising the plan discussed today" },
+  { value: "medical_certificate", label: "Medical certificate", command: "Write a medical certificate" },
 ];
 
 export default function LettersPanel({
@@ -281,6 +281,17 @@ export default function LettersPanel({
     }
   }
 
+  async function handleDeleteLetter(letterId: string, letterCode: string) {
+    if (!confirm(`Delete ${letterCode}? This cannot be undone.`)) return;
+    try {
+      await deleteLetter(letterId, patientId);
+      if (viewingLetter?.id === letterId) setViewingLetter(null);
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
   async function handleSaveContent(letterId: string) {
     const content = editedContent[letterId];
     if (content === undefined) return;
@@ -400,7 +411,11 @@ export default function LettersPanel({
           <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Template</label>
           <select
             value={template}
-            onChange={(e) => setTemplate(e.target.value)}
+            onChange={(e) => {
+              const t = TEMPLATES.find((x) => x.value === e.target.value);
+              setTemplate(e.target.value);
+              if (t?.command) setCommand(t.command);
+            }}
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
           >
             {TEMPLATES.map((t) => (
@@ -703,6 +718,16 @@ export default function LettersPanel({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-400">{new Date(l.created_at).toLocaleString("en-AU")}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteLetter(l.id, l.letter_code); }}
+                        className="text-gray-300 hover:text-rose-500 transition p-0.5 rounded"
+                        title="Delete letter"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                        </svg>
+                      </button>
                       {viewingLetter?.id === l.id ? <ChevronUp size={13} className="text-gray-400"/> : <ChevronDown size={13} className="text-gray-400"/>}
                     </div>
                   </div>
