@@ -12,6 +12,7 @@ type Patient = {
   surgery_date: string | null;
   hospital: string | null;
   bloods_status: string;
+  created_by?: string | null;
   // demographics (may be present)
   mobile?: string | null;
   home_phone?: string | null;
@@ -109,7 +110,7 @@ function ExpandedRow({ patient }: { patient: Patient }) {
   );
 }
 
-function PatientRow({ patient }: { patient: Patient }) {
+function PatientRow({ patient, sharedBy }: { patient: Patient; sharedBy?: string }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -126,7 +127,14 @@ function PatientRow({ patient }: { patient: Patient }) {
               </span>
             </div>
             <div>
-              <p className="font-medium text-slate-800 text-sm">{patient.full_name}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-medium text-slate-800 text-sm">{patient.full_name}</p>
+                {sharedBy && (
+                  <span className="text-[10px] bg-violet-50 text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 font-medium">
+                    Shared by {sharedBy}
+                  </span>
+                )}
+              </div>
               {patient.date_of_birth && (
                 <p className="text-[10px] text-gray-400">DOB {patient.date_of_birth}</p>
               )}
@@ -179,7 +187,15 @@ function groupPatients(patients: Patient[]) {
   return groups.filter((g) => g.patients.length > 0);
 }
 
-export default function PatientsTable({ patients }: { patients: Patient[] }) {
+export default function PatientsTable({
+  patients,
+  currentUserId,
+  sharedByMap,
+}: {
+  patients: Patient[];
+  currentUserId: string;
+  sharedByMap: Record<string, string>;
+}) {
   const [query, setQuery] = useState("");
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
 
@@ -273,7 +289,7 @@ export default function PatientsTable({ patients }: { patients: Patient[] }) {
                   </thead>
                   <tbody>
                     {group.patients.map((p) => (
-                      <PatientRow key={p.id} patient={p} />
+                      <PatientRow key={p.id} patient={p} sharedBy={sharedByMap[p.id]} />
                     ))}
                   </tbody>
                 </table>

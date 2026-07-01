@@ -2,9 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import BloodsStatusSelect from "./BloodsStatusSelect";
 import LettersPanel from "./LettersPanel";
 import PatientProfilePanel from "./PatientProfilePanel";
+import SharePanel from "./SharePanel";
 import ChecklistItemRow from "./ChecklistItemRow";
 import { notFound } from "next/navigation";
 import { CATEGORY_LABELS, type ChecklistCategory } from "@/lib/checklist";
+import { getPatientShares } from "@/app/actions/sharing";
 
 export default async function PatientDetailPage({
   params,
@@ -17,8 +19,13 @@ export default async function PatientDetailPage({
   const { tab: tabParam } = await searchParams;
   const supabase = await createClient();
 
+  const { data: { user } } = await supabase.auth.getUser();
+
   const { data: patient } = await supabase.from("patients").select("*").eq("id", id).single();
   if (!patient) notFound();
+
+  const shares = await getPatientShares(id);
+  const isOwner = patient.created_by === user?.id;
 
   const { data: letters } = await supabase
     .from("letters")
@@ -46,6 +53,7 @@ export default async function PatientDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <SharePanel patientId={id} isOwner={isOwner} shares={shares} />
           <BloodsStatusSelect patientId={id} status={patient.bloods_status} />
         </div>
       </div>
