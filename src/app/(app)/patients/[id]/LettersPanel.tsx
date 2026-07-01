@@ -23,14 +23,18 @@ type Letter = {
 };
 
 const TEMPLATES = [
-  { value: "", label: "— Select template —", command: "" },
-  { value: "gp_letter", label: "GP / Referring doctor letter", command: "Write a GP letter to the referring doctor summarising this consultation" },
-  { value: "preop", label: "Pre-operative assessment", command: "Write a pre-operative assessment letter" },
-  { value: "complex_review", label: "Complex review (MBS 132)", command: "Write a complex review letter (MBS item 132)" },
-  { value: "initial_consult", label: "Initial consult (MBS 110)", command: "Write an initial consultation letter (MBS item 110)" },
-  { value: "followup", label: "Follow-up review", command: "Write a follow-up review letter" },
-  { value: "patient_instructions", label: "Patient instructions", command: "Write patient instructions summarising the plan discussed today" },
-  { value: "medical_certificate", label: "Medical certificate", command: "Write a medical certificate" },
+  { value: "", label: "— Select template —", command: "", clinical: false },
+  { value: "gp_letter", label: "GP / Referring doctor letter", command: "Write a GP letter to the referring doctor summarising this consultation", clinical: false },
+  { value: "preop", label: "Pre-operative assessment", command: "Write a pre-operative assessment letter", clinical: false },
+  { value: "complex_review", label: "Complex review (MBS 132)", command: "Write a complex review letter (MBS item 132)", clinical: false },
+  { value: "initial_consult", label: "Initial consult (MBS 110)", command: "Write an initial consultation letter (MBS item 110)", clinical: false },
+  { value: "followup", label: "Follow-up review", command: "Write a follow-up review letter", clinical: false },
+  { value: "patient_instructions", label: "Patient instructions", command: "Write patient instructions summarising the plan discussed today", clinical: false },
+  { value: "medical_certificate", label: "Medical certificate", command: "Write a medical certificate", clinical: false },
+  // ── Inpatient clinical notes ──────────────────────────────────────────────
+  { value: "ward_round_note", label: "Ward round note", command: "Simple ward round", clinical: true },
+  { value: "admission_note", label: "Admission note", command: "Admission note", clinical: true },
+  { value: "discharge_summary", label: "Discharge summary", command: "Discharge summary draft", clinical: true },
 ];
 
 export default function LettersPanel({
@@ -174,6 +178,36 @@ export default function LettersPanel({
   }
 
   function stopCommandRecording() { commandRecorderRef.current?.stop(); setCommandRecording(false); }
+
+  // ── Clinical note generation (ward round, admission, discharge) ──────────────
+
+  const isClinicalTemplate = TEMPLATES.find((t) => t.value === template)?.clinical ?? false;
+
+  async function handleGenerateClinical() {
+    const rawNote = [transcript, pastedText].filter(Boolean).join("\n\n").trim();
+    if (!rawNote) {
+      alert("Please record a dictation or paste clinical notes first.");
+      return;
+    }
+    const noteType = TEMPLATES.find((t) => t.value === template)?.command || "Progress note";
+    setGenerating(true);
+    setLetterText("");
+    setSaveMessage("");
+    try {
+      const res = await fetch(`/api/patients/${patientId}/ward/clean-note`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawNote, noteType }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Generation failed");
+      setLetterText(data.cleanedNote || "");
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   // ── Generation ───────────────────────────────────────────────────────────────
 
@@ -485,11 +519,11 @@ export default function LettersPanel({
 
           <button
             type="button"
-            onClick={handleGenerate}
+            onClick={isClinicalTemplate ? handleGenerateClinical : handleGenerate}
             disabled={generating}
             className="flex items-center gap-1.5 rounded-md bg-brand-teal text-white text-sm font-medium px-4 py-2 hover:opacity-90 disabled:opacity-50 transition"
           >
-            <Sparkles size={14}/> {generating ? "Generating..." : "Generate letter"}
+            <Sparkles size={14}/> {generating ? "Generating..." : isClinicalTemplate ? "Format note" : "Generate letter"}
           </button>
         </div>
 
@@ -650,7 +684,7 @@ export default function LettersPanel({
                 <textarea
                   value={letterText}
                   onChange={(e) => setLetterText(e.target.value)}
-                  rows={20}
+                  rows={isClinicalTemplate ? 24 : 20}
                   className="w-full px-4 py-3 text-sm font-mono leading-relaxed border-t border-gray-100 focus:outline-none resize-none"
                 />
                 <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50 rounded-b-xl gap-4">

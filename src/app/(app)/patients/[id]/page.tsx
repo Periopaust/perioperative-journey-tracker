@@ -4,6 +4,7 @@ import LettersPanel from "./LettersPanel";
 import PatientProfilePanel from "./PatientProfilePanel";
 import SharePanel from "./SharePanel";
 import ChecklistItemRow from "./ChecklistItemRow";
+import WardPanel from "./WardPanel";
 import { notFound } from "next/navigation";
 import { CATEGORY_LABELS, type ChecklistCategory } from "@/lib/checklist";
 import { getPatientShares } from "@/app/actions/sharing";
@@ -38,6 +39,12 @@ export default async function PatientDetailPage({
     .select("id, item_label, completed, completed_at, category")
     .eq("patient_id", id)
     .order("created_at", { ascending: true });
+
+  const { data: wardNotes } = await supabase
+    .from("ward_notes")
+    .select("id, note_type, note_text, author_name, created_at")
+    .eq("patient_id", id)
+    .order("created_at", { ascending: false });
 
   const activeTab = tabParam ?? "letters";
 
@@ -90,6 +97,15 @@ export default async function PatientDetailPage({
           category={activeTab as ChecklistCategory}
         />
       )}
+
+      {activeTab === "ward" && (
+        <WardPanel
+          patientId={id}
+          initialNotes={wardNotes ?? []}
+          initialProblemList={(patient.problem_list as string[]) ?? []}
+          initialWardLocation={patient.ward_location ?? null}
+        />
+      )}
     </div>
   );
 }
@@ -97,6 +113,7 @@ export default async function PatientDetailPage({
 function Tabs({ activeTab, patientId }: { activeTab: string; patientId: string }) {
   const tabs = [
     { key: "letters", label: "Letters" },
+    { key: "ward", label: "Ward notes" },
     { key: "details", label: "Patient details" },
     { key: "clinical", label: "Clinical checklist" },
     { key: "admin", label: "Admin checklist" },

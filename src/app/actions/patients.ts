@@ -209,6 +209,70 @@ Rules:
   }
 }
 
+export async function saveWardNote(
+  patientId: string,
+  noteType: string,
+  noteText: string,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .single();
+
+  const { error } = await supabase.from("ward_notes").insert({
+    patient_id: patientId,
+    author_id: user.id,
+    author_name: profile?.full_name ?? null,
+    note_type: noteType,
+    note_text: noteText,
+  });
+
+  if (error) return { error: error.message };
+  revalidatePath(`/patients/${patientId}`);
+  return {};
+}
+
+export async function deleteWardNote(noteId: string, patientId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("ward_notes").delete().eq("id", noteId);
+  if (error) return { error: error.message };
+  revalidatePath(`/patients/${patientId}`);
+  return {};
+}
+
+export async function updateProblemList(
+  patientId: string,
+  problemList: string[],
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("patients")
+    .update({ problem_list: problemList })
+    .eq("id", patientId);
+  if (error) return { error: error.message };
+  revalidatePath(`/patients/${patientId}`);
+  return {};
+}
+
+export async function updateWardLocation(
+  patientId: string,
+  wardLocation: string,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("patients")
+    .update({ ward_location: wardLocation })
+    .eq("id", patientId);
+  if (error) return { error: error.message };
+  revalidatePath(`/patients/${patientId}`);
+  return {};
+}
+
 export async function addClinicalNote(patientId: string, formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
