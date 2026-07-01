@@ -85,47 +85,33 @@ export default function WardPanel({
       mr.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+
+        // Single combined call: transcribe + format into clinical note in one step
         setTranscribing(true);
-        let accumulatedRaw = "";
         try {
           const form = new FormData();
           form.append("audio", blob, "dictation.webm");
-          const res = await fetch("/api/dictation/transcribe", { method: "POST", body: form });
+          form.append("noteType", noteType);
+          form.append("problemList", JSON.stringify(problemList));
+
+          const res = await fetch(`/api/patients/${patientId}/ward/dictate`, {
+            method: "POST",
+            body: form,
+          });
           const data = await res.json();
+
           if (data.rawTranscript) {
-            // Use cleanedTranscript if available (already basic-cleaned by transcribe endpoint)
-            const newText = data.cleanedTranscript || data.rawTranscript;
-            // Read current rawNote value for accumulation
-            setRawNote((prev) => {
-              accumulatedRaw = prev ? prev + "\n\n" + newText : newText;
-              return accumulatedRaw;
-            });
-            // Give setState time to flush before we use accumulatedRaw
-            await new Promise((r) => setTimeout(r, 0));
+            setRawNote((prev) => prev ? prev + "\n\n" + data.rawTranscript : data.rawTranscript);
           }
+          if (data.formattedNote) {
+            setCleanedNote(data.formattedNote);
+            setShowCleaned(true);
+          }
+        } catch {
+          // fall through — user sees raw note and can re-format manually
         } finally {
           setTranscribing(false);
-        }
-
-        // Auto-format into structured clinical note immediately after transcription
-        if (accumulatedRaw.trim()) {
-          setAutoFormatting(true);
-          try {
-            const res = await fetch(`/api/patients/${patientId}/ward/clean-note`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ rawNote: accumulatedRaw, noteType, problemList }),
-            });
-            const data = await res.json();
-            if (data.cleanedNote) {
-              setCleanedNote(data.cleanedNote);
-              setShowCleaned(true);
-            }
-          } catch {
-            // silent — user can still manually trigger AI format
-          } finally {
-            setAutoFormatting(false);
-          }
+          setAutoFormatting(false);
         }
       };
       mr.start();
@@ -386,7 +372,7 @@ export default function WardPanel({
             }`}
           >
             {recording ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-            {autoFormatting ? "Formatting note…" : transcribing ? "Transcribing…" : recording ? "Stop recording" : "Dictate"}
+            {transcribing ? "Formatting note…" : recording ? "Stop recording" : "Dictate"}
           </button>
 
           {/* Scan document */}
