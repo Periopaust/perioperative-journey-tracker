@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { letterTextToDocxBuffer } from "@/lib/letter-docx";
 import { revalidatePath } from "next/cache";
 
-export async function saveLetterDraft(patientId: string, letterText: string, procedureType?: string) {
+export async function saveLetterDraft(patientId: string, letterText: string, procedureType?: string, isPeriopLetter = false) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
@@ -32,7 +32,7 @@ export async function saveLetterDraft(patientId: string, letterText: string, pro
   const letterCode = `${prefix}${maxSeq + 1}`;
   const docxPath = `${patient.ur_number}/${letterCode}.docx`;
 
-  const docxBuffer = await letterTextToDocxBuffer(letterText);
+  const docxBuffer = await letterTextToDocxBuffer(letterText, isPeriopLetter);
 
   const { error: uploadError } = await supabase.storage
     .from("patient-letters")

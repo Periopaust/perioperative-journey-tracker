@@ -252,7 +252,8 @@ export default function LettersPanel({
     setSaveMessage("");
 
     try {
-      const result = await saveLetterDraft(patientId, letterText, aiData?.procedure || "");
+      const isPeriopLetter = /pre[\s-]?op|periop|preoperative/i.test(command);
+      const result = await saveLetterDraft(patientId, letterText, aiData?.procedure || "", isPeriopLetter);
       setSaveMessage(`Saved as ${result.letterCode}`);
       router.refresh();
     } catch (err: any) {
