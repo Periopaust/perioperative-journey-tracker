@@ -75,10 +75,12 @@ Discharge Planning
 
 If note type = "Progress note":
 PROGRESS NOTE
-Subjective
-Objective
-Assessment
-Plan
+
+[Write as a single flowing clinical paragraph summarising the patient's status, clinical findings, and trajectory. Do not use subheadings. Do not use Subjective/Objective/Assessment/Plan. Write in the style of a consultant's progress note — concise, clinical, third person.]
+
+Plan:
+- [bullet]
+- [bullet]
 
 If note type = "Admission note":
 ADMISSION NOTE
