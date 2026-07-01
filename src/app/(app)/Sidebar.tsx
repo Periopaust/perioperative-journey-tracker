@@ -24,11 +24,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <aside className="w-16 bg-brand-navy flex flex-col items-center py-4 gap-1.5 shrink-0">
-      <div className="relative w-9 h-9 rounded-lg bg-brand-teal flex items-center justify-center text-white font-semibold text-xs mb-3">
-        PA
-        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-brand-yellow border-2 border-brand-navy" />
-      </div>
-
       {items.map(({ href, label, icon: Icon }) => {
         const active = pathname === href || (pathname.startsWith(href + "/") && !pathname.includes("/journey"));
         return (

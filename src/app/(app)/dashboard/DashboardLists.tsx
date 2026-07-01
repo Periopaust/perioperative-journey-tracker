@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { ChevronDown, ChevronUp, Droplets, Calendar } from "lucide-react";
 
 type PatientRow = {
   id: string;
@@ -9,7 +10,56 @@ type PatientRow = {
   ur_number: string;
   surgery_date: string | null;
   hospital?: string | null;
+  bloods_status?: string;
 };
+
+function CollapsibleCard({
+  title,
+  icon,
+  count,
+  accentBorder,
+  accentHeader,
+  empty,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  count: number;
+  accentBorder: string;
+  accentHeader: string;
+  empty: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  const hasChildren = Array.isArray(children) ? (children as React.ReactNode[]).filter(Boolean).length > 0 : !!children;
+
+  return (
+    <div className={`border rounded-xl overflow-hidden ${accentBorder}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center justify-between px-4 py-3 ${accentHeader}`}
+      >
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="text-sm font-semibold text-slate-700">{title}</span>
+          <span className="rounded-full bg-white/60 text-slate-600 text-[11px] font-semibold px-2 py-0.5">
+            {count}
+          </span>
+        </div>
+        {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+      </button>
+
+      {open && (
+        <div className="px-4 py-3 bg-white">
+          {hasChildren ? children : (
+            <p className="text-sm text-gray-400 py-2">{empty}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DashboardLists({
   pendingBloods,
@@ -35,60 +85,50 @@ export default function DashboardLists({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search by name or UR number"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal"
+        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-teal/50 bg-white"
       />
 
       <div className="grid md:grid-cols-2 gap-4">
-        <AlertCard title="Pending bloods" accent="bg-rose-50/60 border-rose-200" empty="No pending bloods.">
+        <CollapsibleCard
+          title="Pending bloods"
+          icon={<Droplets className="h-4 w-4 text-rose-500" />}
+          count={filteredBloods.length}
+          accentBorder="border-rose-200"
+          accentHeader="bg-rose-50"
+          empty="No pending bloods."
+        >
           {filteredBloods.map((p) => (
             <Link
               key={p.id}
               href={`/patients/${p.id}`}
-              className="flex justify-between text-sm py-1.5 border-b border-gray-100 last:border-0 hover:text-brand-teal"
+              className="flex justify-between text-sm py-2 border-b border-gray-100 last:border-0 hover:text-brand-teal"
             >
-              <span>{p.full_name} ({p.ur_number})</span>
-              <span className="text-gray-400">{p.surgery_date ?? "no date"}</span>
+              <span className="text-slate-700">{p.full_name} <span className="text-gray-400 text-xs">({p.ur_number})</span></span>
+              <span className="text-gray-400 text-xs">{p.surgery_date ?? "no date"}</span>
             </Link>
           ))}
-        </AlertCard>
+        </CollapsibleCard>
 
-        <AlertCard
+        <CollapsibleCard
           title="Upcoming surgeries (next 14 days)"
-          accent="bg-amber-50/60 border-amber-200"
+          icon={<Calendar className="h-4 w-4 text-amber-500" />}
+          count={filteredSurgeries.length}
+          accentBorder="border-amber-200"
+          accentHeader="bg-amber-50"
           empty="No surgeries scheduled in the next 14 days."
         >
           {filteredSurgeries.map((p) => (
             <Link
               key={p.id}
               href={`/patients/${p.id}`}
-              className="flex justify-between text-sm py-1.5 border-b border-gray-100 last:border-0 hover:text-brand-teal"
+              className="flex justify-between text-sm py-2 border-b border-gray-100 last:border-0 hover:text-brand-teal"
             >
-              <span>{p.full_name} ({p.ur_number})</span>
-              <span className="text-gray-400">{p.surgery_date} · {p.hospital}</span>
+              <span className="text-slate-700">{p.full_name} <span className="text-gray-400 text-xs">({p.ur_number})</span></span>
+              <span className="text-gray-400 text-xs">{p.surgery_date} · {p.hospital}</span>
             </Link>
           ))}
-        </AlertCard>
+        </CollapsibleCard>
       </div>
-    </div>
-  );
-}
-
-function AlertCard({
-  title,
-  accent,
-  empty,
-  children,
-}: {
-  title: string;
-  accent: string;
-  empty: string;
-  children: React.ReactNode;
-}) {
-  const hasChildren = Array.isArray(children) ? children.length > 0 : !!children;
-  return (
-    <div className={`border rounded-lg p-4 ${accent}`}>
-      <h2 className="font-semibold mb-2">{title}</h2>
-      {hasChildren ? children : <p className="text-sm text-gray-500">{empty}</p>}
     </div>
   );
 }
