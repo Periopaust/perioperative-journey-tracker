@@ -90,6 +90,17 @@ export async function updateLetterStatus(letterId: string, patientId: string, st
   revalidatePath(`/patients/${patientId}`);
 }
 
+export async function updateLetterContent(letterId: string, patientId: string, content: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { error } = await supabase.from("letters").update({ content }).eq("id", letterId);
+  if (error) throw error;
+
+  revalidatePath(`/patients/${patientId}`);
+}
+
 export async function addLetterNote(letterId: string, patientId: string, notes: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

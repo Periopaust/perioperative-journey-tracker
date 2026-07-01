@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, Upload, Copy, Sparkles, BookMarked, ChevronDown, ChevronUp, FileText } from "lucide-react";
-import { saveLetterDraft, updateLetterStatus, addLetterNote, getLetterSignedUrl } from "@/app/actions/letters";
+import { saveLetterDraft, updateLetterStatus, updateLetterContent, addLetterNote, getLetterSignedUrl } from "@/app/actions/letters";
 import { saveVocabularyCorrection } from "@/app/actions/vocabulary";
 
 type Letter = {
@@ -71,6 +71,8 @@ export default function LettersPanel({
   const [letterOpen, setLetterOpen] = useState(true);
   const [transcriptCopied, setTranscriptCopied] = useState(false);
   const [viewingLetter, setViewingLetter] = useState<Letter | null>(null);
+  const [editedContent, setEditedContent] = useState<Record<string, string>>({});
+  const [savingContent, setSavingContent] = useState("");
 
   // Dictation
   const [recording, setRecording] = useState(false);
@@ -276,6 +278,20 @@ export default function LettersPanel({
       router.refresh();
     } finally {
       setBusyLetterId("");
+    }
+  }
+
+  async function handleSaveContent(letterId: string) {
+    const content = editedContent[letterId];
+    if (content === undefined) return;
+    setSavingContent(letterId);
+    try {
+      await updateLetterContent(letterId, patientId, content);
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingContent("");
     }
   }
 
@@ -691,26 +707,30 @@ export default function LettersPanel({
                     </div>
                   </div>
 
-                  {/* In-app letter viewer */}
+                  {/* In-app letter editor/viewer */}
                   {viewingLetter?.id === l.id && (
                     <div className="border-t border-gray-100">
-                      {l.content ? (
-                        <pre className="w-full px-5 py-4 text-sm leading-relaxed whitespace-pre-wrap font-sans bg-white">
-                          {l.content}
-                        </pre>
-                      ) : (
-                        <p className="px-5 py-4 text-sm text-gray-400 italic">Letter text not available — open the Word document below.</p>
-                      )}
+                      <textarea
+                        value={editedContent[l.id] ?? l.content ?? ""}
+                        onChange={(e) => setEditedContent((prev) => ({ ...prev, [l.id]: e.target.value }))}
+                        rows={22}
+                        className="w-full px-5 py-4 text-sm leading-relaxed font-mono border-0 focus:outline-none resize-none bg-white"
+                        placeholder="Letter content..."
+                      />
 
                       {/* Action bar */}
-                      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-t border-gray-100 bg-gray-50">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenLetter(l.docx_path)}
-                          className="flex items-center gap-1.5 rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition text-slate-600"
-                        >
-                          <FileText size={12}/> Open Word doc
-                        </button>
+                      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-t border-gray-100 bg-gray-50 rounded-b-lg">
+                        {/* Save edits — only show if content was changed */}
+                        {editedContent[l.id] !== undefined && editedContent[l.id] !== l.content && (
+                          <button
+                            type="button"
+                            disabled={savingContent === l.id}
+                            onClick={() => handleSaveContent(l.id)}
+                            className="rounded-md bg-brand-navy text-white text-xs font-medium px-3 py-1.5 hover:opacity-90 disabled:opacity-50 transition"
+                          >
+                            {savingContent === l.id ? "Saving..." : "Save edits"}
+                          </button>
+                        )}
 
                         {l.status === "draft" && (
                           <button
@@ -723,26 +743,44 @@ export default function LettersPanel({
                           </button>
                         )}
                         {l.status === "reviewed" && (
-                          <button
-                            type="button"
-                            disabled={busyLetterId === l.id}
-                            onClick={() => handleStatusChange(l.id, "sent")}
-                            className="rounded-md bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-50 transition"
-                          >
-                            ✓ Ready to Send
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              disabled={busyLetterId === l.id}
+                              onClick={() => handleStatusChange(l.id, "sent")}
+                              className="rounded-md bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-50 transition"
+                            >
+                              ✓ Ready to Send
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenLetter(l.docx_path)}
+                              className="flex items-center gap-1.5 rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition text-slate-600"
+                            >
+                              <FileText size={12}/> Open Word doc
+                            </button>
+                          </>
                         )}
                         {l.status === "sent" && (
-                          <span className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-3 py-1.5">✓ Sent</span>
+                          <>
+                            <span className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-3 py-1.5">✓ Sent</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenLetter(l.docx_path)}
+                              className="flex items-center gap-1.5 rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition text-slate-600"
+                            >
+                              <FileText size={12}/> Open Word doc
+                            </button>
+                          </>
                         )}
                         <button
                           type="button"
                           onClick={() => handleAddNote(l.id)}
-                          className="rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition"
+                          className="rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition ml-auto"
                         >
                           Add note
                         </button>
-                        {l.notes && <span className="text-xs text-gray-500 italic">Note: {l.notes}</span>}
+                        {l.notes && <span className="text-xs text-gray-500 italic">{l.notes}</span>}
                       </div>
                     </div>
                   )}
