@@ -660,7 +660,7 @@ export default function LettersPanel({
                             : "bg-slate-100 text-slate-600"
                         }`}
                       >
-                        {l.status}
+                        {l.status === "draft" ? "Draft" : l.status === "reviewed" ? "Ready to Review" : "Ready to Send"}
                       </span>
                     </div>
                     <span className="text-xs text-gray-400">{new Date(l.created_at).toLocaleString("en-AU")}</span>
@@ -677,22 +677,31 @@ export default function LettersPanel({
                     >
                       Open letter
                     </button>
-                    <button
-                      type="button"
-                      disabled={busyLetterId === l.id}
-                      onClick={() => handleStatusChange(l.id, "reviewed")}
-                      className="rounded-md bg-amber-50 text-amber-700 text-xs font-medium px-2 py-1 hover:bg-amber-100 transition"
-                    >
-                      Mark as reviewed
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyLetterId === l.id}
-                      onClick={() => handleStatusChange(l.id, "sent")}
-                      className="rounded-md bg-emerald-50 text-emerald-700 text-xs font-medium px-2 py-1 hover:bg-emerald-100 transition"
-                    >
-                      Mark as sent
-                    </button>
+                    {l.status === "draft" && (
+                      <button
+                        type="button"
+                        disabled={busyLetterId === l.id}
+                        onClick={() => handleStatusChange(l.id, "reviewed")}
+                        className="rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium px-2 py-1 hover:bg-amber-100 transition"
+                      >
+                        Ready to Review
+                      </button>
+                    )}
+                    {l.status === "reviewed" && (
+                      <button
+                        type="button"
+                        disabled={busyLetterId === l.id}
+                        onClick={() => handleStatusChange(l.id, "sent")}
+                        className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-2 py-1 hover:bg-emerald-100 transition"
+                      >
+                        Ready to Send
+                      </button>
+                    )}
+                    {l.status === "sent" && (
+                      <span className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-2 py-1">
+                        ✓ Ready to Send
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleAddNote(l.id)}
