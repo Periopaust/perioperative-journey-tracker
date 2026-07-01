@@ -54,6 +54,7 @@ export default function WardPanel({
   // Dictation
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [autoFormatting, setAutoFormatting] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
@@ -85,16 +86,46 @@ export default function WardPanel({
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         setTranscribing(true);
+        let accumulatedRaw = "";
         try {
           const form = new FormData();
           form.append("audio", blob, "dictation.webm");
           const res = await fetch("/api/dictation/transcribe", { method: "POST", body: form });
           const data = await res.json();
           if (data.rawTranscript) {
-            setRawNote((prev) => prev ? prev + " " + data.rawTranscript : data.rawTranscript);
+            // Use cleanedTranscript if available (already basic-cleaned by transcribe endpoint)
+            const newText = data.cleanedTranscript || data.rawTranscript;
+            // Read current rawNote value for accumulation
+            setRawNote((prev) => {
+              accumulatedRaw = prev ? prev + "\n\n" + newText : newText;
+              return accumulatedRaw;
+            });
+            // Give setState time to flush before we use accumulatedRaw
+            await new Promise((r) => setTimeout(r, 0));
           }
         } finally {
           setTranscribing(false);
+        }
+
+        // Auto-format into structured clinical note immediately after transcription
+        if (accumulatedRaw.trim()) {
+          setAutoFormatting(true);
+          try {
+            const res = await fetch(`/api/patients/${patientId}/ward/clean-note`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ rawNote: accumulatedRaw, noteType, problemList }),
+            });
+            const data = await res.json();
+            if (data.cleanedNote) {
+              setCleanedNote(data.cleanedNote);
+              setShowCleaned(true);
+            }
+          } catch {
+            // silent — user can still manually trigger AI format
+          } finally {
+            setAutoFormatting(false);
+          }
         }
       };
       mr.start();
@@ -345,15 +376,17 @@ export default function WardPanel({
           {/* Dictation button */}
           <button
             onClick={recording ? stopRecording : startRecording}
-            disabled={transcribing}
+            disabled={transcribing || autoFormatting}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border font-medium transition ${
               recording
                 ? "bg-rose-50 border-rose-200 text-rose-600 animate-pulse"
+                : autoFormatting
+                ? "border-violet-200 text-violet-600 opacity-70"
                 : "border-gray-200 text-gray-600 hover:bg-gray-50"
             }`}
           >
             {recording ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-            {transcribing ? "Transcribing…" : recording ? "Stop recording" : "Dictate"}
+            {autoFormatting ? "Formatting note…" : transcribing ? "Transcribing…" : recording ? "Stop recording" : "Dictate"}
           </button>
 
           {/* Scan document */}
@@ -377,7 +410,7 @@ export default function WardPanel({
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-violet-200 text-violet-600 hover:bg-violet-50 disabled:opacity-40"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            {cleaning ? "Formatting…" : "AI format"}
+            {cleaning ? "Formatting…" : "Re-format"}
           </button>
 
           {/* Save */}

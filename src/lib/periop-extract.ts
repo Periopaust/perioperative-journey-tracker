@@ -39,16 +39,25 @@ RULES:
 2. Remove filler words ("um", "uh", "like", "sort of", "you know"), false starts, and stutter repeats.
 3. Apply the KNOWN CORRECTIONS list above exactly — these are user-confirmed fixes.
 4. MEDICATION NAMES — use Australian brand names and correct spellings. Common examples:
+   - Palexia (tapentadol, opioid analgesic) — not Paralexia, Paraxia, Palexa, Palecia
+   - Targin (oxycodone/naloxone) — not Tarkin, Target, Targen
+   - Endone (oxycodone immediate release) — not Andon, Endon
    - Karvezide (irbesartan/HCTZ) — not Carbizide, Carbezide, Karbizide
    - Notan (atenolol brand) — capitalise
    - Vytorin (ezetimibe/simvastatin)
-   - Lyrica (pregabalin)
+   - Lyrica (pregabalin) — not Lyrika, Lirica
    - Mobic (meloxicam)
    - Tixol (tianeptine)
    - Slinda (progesterone-only contraceptive pill) — not Slender, Slinder, Slim, Slider
    - Symbicort (budesonide/formoterol inhaler) — only use if clearly stated; do NOT substitute for other medications
+   - Ozempic (semaglutide) — not Osempic, Ozempik
+   - Jardiance (empagliflozin) — not Gardiance, Jardians
+   - Eliquis (apixaban) — not Aliquis, Eliqus
+   - Xarelto (rivaroxaban) — not Zarelto, Zaralto
    - Apixaban, rivaroxaban, dabigatran — correct full spelling
    - Metformin, atorvastatin, ramipril, perindopril — standard spellings
+   - Hyponatraemia — not hyponatremia (Australian spelling)
+   - Sodium osmolality, serum osmolality — not sodium osmolality misheard
    - CRITICAL: Never substitute one medication name for another that sounds similar. If uncertain, preserve what was said phonetically rather than guessing a different drug.
 5. CLINICAL DESCRIPTORS — correct obvious mis-transcriptions of clinical terms:
    - "neuropathic" not "neurotic"
