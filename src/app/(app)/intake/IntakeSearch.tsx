@@ -19,6 +19,7 @@ type Letter = {
   recipient_name: string | null;
   cc: string | null;
   template: string | null;
+  content: string | null;
   status: "draft" | "reviewed" | "sent";
   docx_path: string | null;
   notes: string | null;

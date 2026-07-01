@@ -60,6 +60,7 @@ export async function saveLetterDraft(
     patient_id: patientId,
     letter_code: letterCode,
     procedure_type: procedureType || null,
+    content: letterText,
     docx_path: docxPath,
     status: "draft",
     created_by: user.id,

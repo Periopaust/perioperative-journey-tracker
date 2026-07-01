@@ -15,6 +15,7 @@ type Letter = {
   recipient_name: string | null;
   cc: string | null;
   template: string | null;
+  content: string | null;
   status: "draft" | "reviewed" | "sent";
   docx_path: string | null;
   notes: string | null;
@@ -65,9 +66,11 @@ export default function LettersPanel({
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [busyLetterId, setBusyLetterId] = useState("");
-  const [showSaved, setShowSaved] = useState(false);
+  const [showSaved, setShowSaved] = useState(true);
   const [workspaceOpen, setWorkspaceOpen] = useState(true);
+  const [letterOpen, setLetterOpen] = useState(true);
   const [transcriptCopied, setTranscriptCopied] = useState(false);
+  const [viewingLetter, setViewingLetter] = useState<Letter | null>(null);
 
   // Dictation
   const [recording, setRecording] = useState(false);
@@ -588,55 +591,61 @@ export default function LettersPanel({
           </button>
         </form>
 
-        {/* Letter output + save */}
+        {/* Generated letter — collapsible */}
         {letterText && (
           <div className="bg-white border border-gray-200 rounded-xl">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+            <button
+              type="button"
+              onClick={() => setLetterOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition rounded-t-xl"
+            >
               <h3 className="font-semibold text-sm text-slate-700">
-                {aiData?.procedure ? `Letter — ${aiData.procedure}` : "Generated Letter"}
+                {aiData?.procedure ? `Generated Letter — ${aiData.procedure}` : "Generated Letter"}
               </h3>
-              <button
-                type="button"
-                onClick={() => navigator.clipboard.writeText(letterText)}
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 text-xs font-medium px-3 py-1 hover:bg-gray-50 transition text-slate-600"
-              >
-                <Copy size={12}/> Copy
-              </button>
-            </div>
-
-            <textarea
-              value={letterText}
-              onChange={(e) => setLetterText(e.target.value)}
-              rows={20}
-              className="w-full px-4 py-3 text-sm font-mono leading-relaxed border-0 focus:outline-none resize-none"
-            />
-
-            {/* Bottom save bar — Gentu style */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50 rounded-b-xl gap-4">
-              <div className="flex items-center gap-4 text-sm text-slate-600">
-                <span className="font-medium">Status:</span>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" readOnly checked className="accent-brand-teal"/> Draft
-                </label>
-                <span className="text-gray-300">→</span>
-                <span className="text-gray-400">Ready to Review</span>
-                <span className="text-gray-300">→</span>
-                <span className="text-gray-400">Ready to Send</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(letterText); }}
+                  className="flex items-center gap-1 rounded-md border border-gray-300 text-xs font-medium px-2 py-1 hover:bg-gray-100 transition text-slate-600"
+                >
+                  <Copy size={11}/> Copy
+                </button>
+                {letterOpen ? <ChevronUp size={15} className="text-gray-400"/> : <ChevronDown size={15} className="text-gray-400"/>}
               </div>
-              <button
-                type="button"
-                onClick={handleSaveDraft}
-                disabled={saving}
-                className="flex items-center gap-1.5 rounded-md bg-brand-teal text-white text-sm font-medium px-5 py-2 hover:opacity-90 disabled:opacity-50 transition"
-              >
-                <FileText size={14}/> {saving ? "Saving..." : "Save"}
-              </button>
-            </div>
+            </button>
 
-            {saveMessage && (
-              <div className={`px-4 py-2 text-sm border-t border-gray-100 ${saveMessage.startsWith("Error") ? "text-rose-600" : "text-emerald-700"}`}>
-                {saveMessage}
-              </div>
+            {letterOpen && (
+              <>
+                <textarea
+                  value={letterText}
+                  onChange={(e) => setLetterText(e.target.value)}
+                  rows={20}
+                  className="w-full px-4 py-3 text-sm font-mono leading-relaxed border-t border-gray-100 focus:outline-none resize-none"
+                />
+                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50 rounded-b-xl gap-4">
+                  <div className="flex items-center gap-3 text-sm text-slate-500">
+                    <span className="font-medium text-slate-700">Status:</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-brand-teal inline-block"/>Draft</span>
+                    <span className="text-gray-300">→</span>
+                    <span className="text-gray-400">Ready to Review</span>
+                    <span className="text-gray-300">→</span>
+                    <span className="text-gray-400">Ready to Send</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    disabled={saving}
+                    className="flex items-center gap-1.5 rounded-md bg-brand-teal text-white text-sm font-medium px-5 py-2 hover:opacity-90 disabled:opacity-50 transition"
+                  >
+                    <FileText size={14}/> {saving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+                {saveMessage && (
+                  <div className={`px-4 py-2 text-sm border-t border-gray-100 ${saveMessage.startsWith("Error") ? "text-rose-600" : "text-emerald-700"}`}>
+                    {saveMessage}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -646,20 +655,24 @@ export default function LettersPanel({
           <button
             type="button"
             onClick={() => setShowSaved((s) => !s)}
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition rounded-xl"
           >
             <h3 className="font-semibold text-sm">
               Saved letters {letters.length > 0 && <span className="text-gray-400 font-normal">({letters.length})</span>}
             </h3>
-            <span className="text-gray-400 text-xs">{showSaved ? "Hide" : "Show"}</span>
+            {showSaved ? <ChevronUp size={14} className="text-gray-400"/> : <ChevronDown size={14} className="text-gray-400"/>}
           </button>
 
           {showSaved && (
-            <div className="px-4 pb-4 space-y-2">
+            <div className="px-4 pb-4 space-y-2 border-t border-gray-100 pt-3">
               {letters.length === 0 && <p className="text-sm text-gray-400">No letters saved yet.</p>}
               {letters.map((l) => (
-                <div key={l.id} className="border border-gray-200 rounded-lg p-3 text-sm space-y-2">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
+                <div key={l.id} className="border border-gray-200 rounded-lg overflow-hidden text-sm">
+                  {/* Letter header row */}
+                  <div
+                    className="flex items-center justify-between flex-wrap gap-2 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition"
+                    onClick={() => setViewingLetter(viewingLetter?.id === l.id ? null : l)}
+                  >
                     <div className="flex items-center gap-2 flex-wrap">
                       <strong>{l.letter_code}</strong>
                       {l.priority === "urgent" && (
@@ -670,42 +683,69 @@ export default function LettersPanel({
                       }`}>
                         {l.status === "draft" ? "Draft" : l.status === "reviewed" ? "Ready to Review" : "Ready to Send"}
                       </span>
+                      {l.recipient_name && <span className="text-xs text-gray-500">To: {l.recipient_name}</span>}
                     </div>
-                    <span className="text-xs text-gray-400">{new Date(l.created_at).toLocaleString("en-AU")}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">{new Date(l.created_at).toLocaleString("en-AU")}</span>
+                      {viewingLetter?.id === l.id ? <ChevronUp size={13} className="text-gray-400"/> : <ChevronDown size={13} className="text-gray-400"/>}
+                    </div>
                   </div>
 
-                  <div className="text-xs text-gray-500 space-y-0.5">
-                    {l.recipient_name && <p>To: {l.recipient_name}</p>}
-                    {l.cc && <p>CC: {l.cc}</p>}
-                    {l.procedure_type && <p>{l.procedure_type}</p>}
-                    {l.notes && <p>Note: {l.notes}</p>}
-                  </div>
+                  {/* In-app letter viewer */}
+                  {viewingLetter?.id === l.id && (
+                    <div className="border-t border-gray-100">
+                      {l.content ? (
+                        <pre className="w-full px-5 py-4 text-sm leading-relaxed whitespace-pre-wrap font-sans bg-white">
+                          {l.content}
+                        </pre>
+                      ) : (
+                        <p className="px-5 py-4 text-sm text-gray-400 italic">Letter text not available — open the Word document below.</p>
+                      )}
 
-                  <div className="flex gap-2 flex-wrap">
-                    <button type="button" onClick={() => handleOpenLetter(l.docx_path)}
-                      className="rounded-md bg-brand-teal text-white text-xs font-medium px-2 py-1 hover:opacity-90">
-                      Open letter
-                    </button>
-                    {l.status === "draft" && (
-                      <button type="button" disabled={busyLetterId === l.id} onClick={() => handleStatusChange(l.id, "reviewed")}
-                        className="rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium px-2 py-1 hover:bg-amber-100 transition">
-                        Ready to Review
-                      </button>
-                    )}
-                    {l.status === "reviewed" && (
-                      <button type="button" disabled={busyLetterId === l.id} onClick={() => handleStatusChange(l.id, "sent")}
-                        className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-2 py-1 hover:bg-emerald-100 transition">
-                        Ready to Send
-                      </button>
-                    )}
-                    {l.status === "sent" && (
-                      <span className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-2 py-1">✓ Ready to Send</span>
-                    )}
-                    <button type="button" onClick={() => handleAddNote(l.id)}
-                      className="rounded-md border border-gray-300 text-xs font-medium px-2 py-1 hover:bg-gray-50">
-                      Add note
-                    </button>
-                  </div>
+                      {/* Action bar */}
+                      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-t border-gray-100 bg-gray-50">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenLetter(l.docx_path)}
+                          className="flex items-center gap-1.5 rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition text-slate-600"
+                        >
+                          <FileText size={12}/> Open Word doc
+                        </button>
+
+                        {l.status === "draft" && (
+                          <button
+                            type="button"
+                            disabled={busyLetterId === l.id}
+                            onClick={() => handleStatusChange(l.id, "reviewed")}
+                            className="rounded-md bg-amber-500 text-white text-xs font-medium px-3 py-1.5 hover:bg-amber-600 disabled:opacity-50 transition"
+                          >
+                            ✓ Ready to Review
+                          </button>
+                        )}
+                        {l.status === "reviewed" && (
+                          <button
+                            type="button"
+                            disabled={busyLetterId === l.id}
+                            onClick={() => handleStatusChange(l.id, "sent")}
+                            className="rounded-md bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-50 transition"
+                          >
+                            ✓ Ready to Send
+                          </button>
+                        )}
+                        {l.status === "sent" && (
+                          <span className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-3 py-1.5">✓ Sent</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleAddNote(l.id)}
+                          className="rounded-md border border-gray-300 text-xs font-medium px-3 py-1.5 hover:bg-gray-100 transition"
+                        >
+                          Add note
+                        </button>
+                        {l.notes && <span className="text-xs text-gray-500 italic">Note: {l.notes}</span>}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
