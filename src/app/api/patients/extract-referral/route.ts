@@ -6,26 +6,42 @@ const SYSTEM_PROMPT = `You are a medical records assistant. Extract patient and 
 
 Return a JSON object with these fields (use null if not found):
 {
-  "full_name": "patient full name",
-  "date_of_birth": "YYYY-MM-DD format",
-  "ur_number": "UR or patient number if present",
-  "referring_surgeon": "referring doctor's name e.g. Dr John Smith",
-  "referring_practice": "referring practice or clinic name",
+  "full_name": "patient full name (no title)",
+  "date_of_birth": "YYYY-MM-DD",
+  "ur_number": "UR or patient number",
+  "title": "Mr/Mrs/Ms/Miss/Dr/Prof etc",
+  "referring_surgeon": "referring doctor full name e.g. Dr John Smith",
+  "referring_practice": "referring practice or clinic",
   "referring_address": "referring doctor address",
   "planned_surgery": "planned procedure or surgery",
-  "surgery_date": "YYYY-MM-DD format or null",
+  "surgery_date": "YYYY-MM-DD or null",
   "hospital": "hospital name",
-  "medicare_number": "Medicare number if present",
-  "phone": "patient phone number",
-  "address": "patient address",
+  "medicare_number": "Medicare number",
+  "medicare_irn": "IRN digit (position on card)",
+  "medicare_expiry": "MM/YY format",
+  "dva_number": "DVA number if present",
+  "health_fund": "private health fund name",
+  "health_fund_number": "health fund membership number",
+  "phone": "patient mobile or primary phone",
+  "home_phone": "patient home phone if separate",
+  "fax": "fax number",
+  "email": "patient email address",
+  "address": "patient street address",
+  "suburb": "patient suburb",
+  "state": "patient state (e.g. NSW, VIC)",
+  "postcode": "patient postcode",
+  "occupation": "patient occupation",
+  "country_of_birth": "country of birth",
+  "nok_name": "next of kin or emergency contact name",
+  "nok_relationship": "next of kin relationship",
+  "nok_phone": "next of kin phone",
   "reason_for_referral": "brief reason for referral"
 }
 
 IMPORTANT:
 - full_name and date_of_birth are the most critical fields
-- For date_of_birth: convert formats like "01/01/1980" or "1 January 1980" to YYYY-MM-DD
-- For names: include full name as written, e.g. "Mr John Smith" → "John Smith" (remove titles)
-- If a field is genuinely not present, return null
+- Convert date_of_birth formats like "01/01/1980" or "1 January 1980" to YYYY-MM-DD
+- Remove titles (Mr/Mrs/Dr) from full_name but capture them in the title field
 - Return ONLY valid JSON, no explanation`;
 
 export async function POST(request: Request) {
