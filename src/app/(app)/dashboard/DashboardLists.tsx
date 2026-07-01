@@ -11,6 +11,7 @@ type PatientRow = {
   surgery_date: string | null;
   hospital?: string | null;
   bloods_status?: string;
+  bloods_expected_date?: string | null;
 };
 
 function CollapsibleCard({
@@ -101,10 +102,15 @@ export default function DashboardLists({
             <Link
               key={p.id}
               href={`/patients/${p.id}`}
-              className="flex justify-between text-sm py-2 border-b border-gray-100 last:border-0 hover:text-brand-teal"
+              className="flex justify-between items-start text-sm py-2 border-b border-gray-100 last:border-0 hover:text-brand-teal gap-4"
             >
               <span className="text-slate-700">{p.full_name} <span className="text-gray-400 text-xs">({p.ur_number})</span></span>
-              <span className="text-gray-400 text-xs">{p.surgery_date ?? "no date"}</span>
+              <div className="text-right shrink-0">
+                <p className="text-gray-400 text-xs">{p.surgery_date ?? "no surgery date"}</p>
+                {p.bloods_expected_date && (
+                  <p className="text-amber-600 text-[11px] font-medium">Bloods due {p.bloods_expected_date}</p>
+                )}
+              </div>
             </Link>
           ))}
         </CollapsibleCard>

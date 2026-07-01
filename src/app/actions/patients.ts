@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/checklist";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import OpenAI from "openai";
 
 export async function createPatient(formData: FormData) {
   const supabase = await createClient();
@@ -133,6 +134,79 @@ export async function updatePatient(patientId: string, formData: FormData) {
 
   if (error) throw new Error(error.message);
   revalidatePath(`/patients/${patientId}`);
+}
+
+/**
+ * Scans letter text and/or dictation transcript for blood test mentions.
+ * If found, updates bloods_status → "ordered" and captures expected availability date.
+ * Called silently after every letter save — no UI dependency.
+ */
+export async function extractAndUpdateBloods(
+  patientId: string,
+  text: string,           // letter text
+  transcript?: string,    // raw dictation (optional, may contain more detail)
+) {
+  const combined = [text, transcript].filter(Boolean).join("\n\n");
+  if (!combined.trim()) return;
+
+  // Quick regex pre-check — skip AI call if no blood mention at all
+  const hasMention = /\bblood(s|[ -]test)?\b|\bFBC\b|\bUEC\b|\bLFT\b|\bcoag\b|\bINR\b|\bHb\b|\bhaemoglobin\b/i.test(combined);
+  if (!hasMention) return;
+
+  try {
+    const openai = new OpenAI({
+      apiKey: process.env.AZURE_OPENAI_API_KEY!,
+      baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/v1`,
+    });
+
+    const response = await openai.chat.completions.create({
+      model: process.env.AZURE_OPENAI_DEPLOYMENT!,
+      messages: [
+        {
+          role: "system",
+          content: `You extract blood test status from clinical text. Return JSON only:
+{
+  "bloods_mentioned": true/false,
+  "status": "ordered" | "pending" | "received" | null,
+  "expected_date": "YYYY-MM-DD or null",
+  "notes": "brief reason e.g. 'FBC/UEC ordered, results expected before surgery'"
+}
+Rules:
+- "ordered" = bloods have been requested/ordered
+- "pending" = bloods ordered but results not yet back
+- "received" = results available
+- expected_date: extract any mentioned date (e.g. "bloods available by Monday 7 July" → that date); today is ${new Date().toISOString().slice(0, 10)}
+- If no blood tests mentioned at all, set bloods_mentioned: false and all others null`,
+        },
+        {
+          role: "user",
+          content: `Extract blood test status from this clinical text:\n\n${combined.slice(0, 4000)}`,
+        },
+      ],
+      temperature: 0,
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    const result = JSON.parse(raw);
+
+    if (!result.bloods_mentioned || !result.status) return;
+
+    const supabase = await createClient();
+    await supabase
+      .from("patients")
+      .update({
+        bloods_status: result.status,
+        ...(result.expected_date ? { bloods_expected_date: result.expected_date } : {}),
+      })
+      .eq("id", patientId);
+
+    revalidatePath(`/patients/${patientId}`);
+    revalidatePath("/dashboard");
+  } catch (err) {
+    // Non-critical — log and continue silently
+    console.error("[extractAndUpdateBloods]", err);
+  }
 }
 
 export async function addClinicalNote(patientId: string, formData: FormData) {

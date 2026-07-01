@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { letterTextToDocxBuffer } from "@/lib/letter-docx";
 import { revalidatePath } from "next/cache";
+import { extractAndUpdateBloods } from "./patients";
 
 export async function saveLetterDraft(
   patientId: string,
@@ -76,6 +77,9 @@ export async function saveLetterDraft(
 
   revalidatePath(`/patients/${patientId}`);
 
+  // Silently scan letter for blood test mentions and auto-update patient status
+  extractAndUpdateBloods(patientId, letterText).catch(() => {});
+
   return { letterCode };
 }
 
@@ -116,6 +120,9 @@ export async function updateLetterContent(letterId: string, patientId: string, c
   if (error) throw error;
 
   revalidatePath(`/patients/${patientId}`);
+
+  // Re-scan edited letter for updated blood test mentions
+  extractAndUpdateBloods(patientId, content).catch(() => {});
 }
 
 export async function addLetterNote(letterId: string, patientId: string, notes: string) {

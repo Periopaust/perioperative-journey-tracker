@@ -10,7 +10,7 @@ export default async function DashboardPage() {
 
   const { data: pendingBloods } = await supabase
     .from("patients")
-    .select("id, full_name, ur_number, surgery_date, bloods_status")
+    .select("id, full_name, ur_number, surgery_date, bloods_status, bloods_expected_date")
     .neq("bloods_status", "received")
     .order("surgery_date", { ascending: true, nullsFirst: false });
 
