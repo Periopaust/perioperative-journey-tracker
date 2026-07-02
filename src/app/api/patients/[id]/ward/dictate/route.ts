@@ -24,10 +24,20 @@ async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string
   return result.phrases?.map((p: any) => p.text).join(" ").trim() || "";
 }
 
-function buildClinicalNotePrompt(rawDictation: string, noteType: string, problemList: string[], patient: any) {
+function buildClinicalNotePrompt(
+  rawDictation: string,
+  noteType: string,
+  problemList: string[],
+  patient: any,
+  glossary: { wrong_term: string; correct_term: string }[],
+) {
   const activeProblems = problemList.length > 0
     ? problemList.map((p) => `- ${p}`).join("\n")
     : "No active problem list documented.";
+
+  const glossaryLines = glossary.length > 0
+    ? `\nUSER CORRECTIONS (apply these first — highest priority):\n${glossary.map((g) => `  "${g.wrong_term}" → "${g.correct_term}"`).join("\n")}\n`
+    : "";
 
   return `You are an experienced Australian Consultant Physician.
 
@@ -37,8 +47,9 @@ Rules:
 - Use Australian spelling and medical terminology.
 - Never invent facts, examination findings, or investigation results not stated.
 - Expand common medical abbreviations appropriately.
-- Correct obvious speech recognition errors where clinically clear. Examples:
-  - "Paralexia" or "Paraxia" → Palexia (tapentadol, opioid analgesic)
+- Correct obvious speech recognition errors where clinically clear. Built-in corrections:
+  - "Wara" or "Vara" or "Wora" → Vohra (clinician surname)
+  - "Paralexia", "Paraxia", "Palexa" → Palexia (tapentadol, opioid analgesic)
   - "Tarkin" → Targin
   - "Andon" or "Endon" → Endone
   - "hyponatremia" → hyponatraemia (Australian spelling)
@@ -50,6 +61,7 @@ Rules:
 - Preserve all clinical meaning and detail.
 - If information is missing, leave the section blank or write "Not documented".
 - The clinician will review and edit before use.
+${glossaryLines}
 
 PATIENT CONTEXT
 Ward/Location: ${patient?.ward_location || "Not documented"}
@@ -218,15 +230,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: "No speech detected in recording" }, { status: 422 });
   }
 
-  // Step 2: Fetch patient context for the prompt
-  const { data: patient } = await supabase
-    .from("patients")
-    .select("ward_location, planned_surgery")
-    .eq("id", patientId)
-    .single();
+  // Step 2: Fetch patient context + vocabulary corrections in parallel
+  const [{ data: patient }, { data: glossaryData }] = await Promise.all([
+    supabase.from("patients").select("ward_location, planned_surgery").eq("id", patientId).single(),
+    supabase.from("vocabulary_corrections").select("wrong_term, correct_term"),
+  ]);
+
+  const glossary = glossaryData ?? [];
 
   // Step 3: Format directly into structured clinical note (single AI call)
-  const prompt = buildClinicalNotePrompt(rawTranscript, noteType, problemList, patient);
+  const prompt = buildClinicalNotePrompt(rawTranscript, noteType, problemList, patient, glossary);
 
   const aiRes = await fetch(
     `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-10-21`,

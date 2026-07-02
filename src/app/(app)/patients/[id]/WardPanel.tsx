@@ -3,9 +3,10 @@
 import { useState, useRef, useTransition } from "react";
 import {
   Mic, MicOff, Sparkles, Save, Trash2, Plus, X,
-  ChevronDown, ChevronUp, ClipboardList, FileText, Copy, Check, ScanLine,
+  ChevronDown, ChevronUp, ClipboardList, FileText, Copy, Check, ScanLine, BookMarked,
 } from "lucide-react";
 import { saveWardNote, deleteWardNote, updateProblemList, updateWardLocation } from "@/app/actions/patients";
+import { saveVocabularyCorrection } from "@/app/actions/vocabulary";
 
 type WardNote = {
   id: string;
@@ -65,6 +66,13 @@ export default function WardPanel({
   // Scan document
   const [scanning, setScanning] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
+
+  // Teach vocabulary correction
+  const [showTeach, setShowTeach] = useState(false);
+  const [teachWrong, setTeachWrong] = useState("");
+  const [teachCorrect, setTeachCorrect] = useState("");
+  const [teachSaving, setTeachSaving] = useState(false);
+  const [teachMessage, setTeachMessage] = useState("");
 
   // Generate
   const [generating, setGenerating] = useState<string | null>(null);
@@ -201,6 +209,25 @@ export default function WardPanel({
   async function saveLocation() {
     await updateWardLocation(patientId, wardLocation);
     setWardLocationSaved(true);
+  }
+
+  // ── Teach vocabulary correction ────────────────────────────────────────────
+
+  async function handleTeachSave() {
+    if (!teachWrong.trim() || !teachCorrect.trim()) return;
+    setTeachSaving(true);
+    setTeachMessage("");
+    try {
+      await saveVocabularyCorrection(teachWrong.trim(), teachCorrect.trim(), "clinical");
+      setTeachMessage(`Saved: "${teachWrong}" → "${teachCorrect}"`);
+      setTeachWrong("");
+      setTeachCorrect("");
+      setTimeout(() => { setShowTeach(false); setTeachMessage(""); }, 2500);
+    } catch (err: any) {
+      setTeachMessage(`Error: ${err.message}`);
+    } finally {
+      setTeachSaving(false);
+    }
   }
 
   // ── Scan document (Document Intelligence) ─────────────────────────────────
@@ -399,6 +426,17 @@ export default function WardPanel({
             {cleaning ? "Formatting…" : "Re-format"}
           </button>
 
+          {/* Teach */}
+          {rawNote && (
+            <button
+              onClick={() => { setShowTeach((s) => !s); setTeachMessage(""); }}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border transition ${showTeach ? "border-brand-teal text-brand-teal bg-brand-teal/5" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+            >
+              <BookMarked className="h-3.5 w-3.5" />
+              Teach
+            </button>
+          )}
+
           {/* Save */}
           <button
             onClick={handleSave}
@@ -409,6 +447,42 @@ export default function WardPanel({
             {saving ? "Saving…" : "Save note"}
           </button>
         </div>
+
+        {/* Teach panel */}
+        {showTeach && (
+          <div className="border border-brand-teal/20 bg-brand-teal/5 rounded-lg px-4 py-3 space-y-2">
+            <p className="text-xs text-slate-600 font-medium">
+              Correct a speech recognition error — saved corrections apply to all future dictations.
+            </p>
+            <div className="flex gap-2 flex-wrap items-center">
+              <input
+                value={teachWrong}
+                onChange={(e) => setTeachWrong(e.target.value)}
+                placeholder="Wrong word (e.g. Wara)"
+                className="flex-1 min-w-32 rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-teal/50"
+              />
+              <span className="text-gray-400 text-xs">→</span>
+              <input
+                value={teachCorrect}
+                onChange={(e) => setTeachCorrect(e.target.value)}
+                placeholder="Correct word (e.g. Vohra)"
+                className="flex-1 min-w-32 rounded border border-gray-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-teal/50"
+              />
+              <button
+                onClick={handleTeachSave}
+                disabled={teachSaving || !teachWrong.trim() || !teachCorrect.trim()}
+                className="rounded-md bg-brand-teal text-white text-xs font-medium px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
+              >
+                {teachSaving ? "Saving…" : "Save correction"}
+              </button>
+            </div>
+            {teachMessage && (
+              <p className={`text-xs ${teachMessage.startsWith("Error") ? "text-rose-500" : "text-emerald-600"}`}>
+                {teachMessage}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Generate section */}
