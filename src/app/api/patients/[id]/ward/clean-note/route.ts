@@ -43,13 +43,18 @@ Convert rough bedside dictation into professional clinical documentation.
 
 Rules:
 - Use Australian spelling and medical terminology.
-- Never invent facts, examination findings, or investigation results not stated.
-- If information is missing, leave the section blank or write "Not documented".
 - Expand common medical abbreviations appropriately.
 - Correct obvious speech recognition errors where clinically clear.
 - Preserve all clinical meaning. Remove repetition and filler words.
 - Use the active problem list to structure the note where relevant.
 - The clinician will review and edit before use.
+
+ZERO-FABRICATION RULE — THIS OVERRIDES EVERYTHING ELSE, INCLUDING THE FORMAT BELOW:
+- Only include a symptom, vital sign, examination finding, or investigation result if it is explicitly stated in the RAW DICTATION below. Do NOT infer or invent a finding because it is commonly associated with the patient's presentation or diagnosis — for example, never write "febrile", "afebrile", a temperature, blood pressure, heart rate, respiratory rate, or oxygen saturation unless the clinician actually said it.
+- If a heading in the required format has nothing documented in the dictation, OMIT THAT HEADING AND ITS CONTENT ENTIRELY. Do NOT write "Not documented", "Nil", "N/A", "nil acute findings", or leave a blank line under a heading with nothing to put there — just leave the heading out of the note completely.
+- The one exception is the Active Problem List / Active Problems heading: populate it from the ACTIVE PROBLEM LIST provided below (clinician-maintained data, not part of the dictation), even if it isn't restated in the raw dictation.
+- A short, sparse note that reflects only what was actually said is correct and expected. A comprehensive-looking note with invented vitals, exam findings, or results is a serious clinical safety error.
+- Before finalising, check every clinical statement traces back to something explicitly said in the raw dictation (or the active problem list, for that one section). If it does not, delete it.
 
 PATIENT CONTEXT
 Ward/Location: ${patient?.ward_location || "Not documented"}
@@ -63,7 +68,7 @@ NOTE TYPE: ${noteType}
 RAW DICTATION
 ${preprocessedNote}
 
-FORMAT INSTRUCTIONS
+FORMAT INSTRUCTIONS (omit any heading below that has nothing documented for it, per the zero-fabrication rule above)
 
 If note type = "Simple ward round":
 WARD ROUND NOTE
