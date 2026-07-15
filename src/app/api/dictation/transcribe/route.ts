@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { cleanDictationTranscript } from "@/lib/periop-extract";
+import { loadDictionary, preprocess } from "@/lib/pipeline/dictionary";
+import { postprocess } from "@/lib/pipeline/postprocess";
 
 async function transcribeWithAzureSpeech(buffer: Buffer, mimeType: string) {
   const key = process.env.AZURE_SPEECH_KEY;
@@ -59,12 +61,18 @@ export async function POST(request: Request) {
       return Response.json({ error: "No speech detected in recording" }, { status: 422 });
     }
 
-    // Load user's saved vocabulary corrections and pass to cleanup
-    const { data: glossary } = await supabase
-      .from("vocabulary_corrections")
-      .select("wrong_term, correct_term");
+    // Shared pipeline pre-processing (spec Section 3.1): fuzzy-match the raw
+    // transcript against the shared correction dictionary before it reaches
+    // the LLM, then pass the same dictionary through as prompt-level hints.
+    const dictionary = await loadDictionary(supabase);
+    const preprocessed = preprocess(rawTranscript, dictionary);
+    const glossaryForPrompt = dictionary.map((d) => ({ wrong_term: d.variant, correct_term: d.canonical }));
 
-    const cleanedTranscript = await cleanDictationTranscript(rawTranscript, glossary ?? []);
+    const llmCleaned = await cleanDictationTranscript(preprocessed, glossaryForPrompt);
+
+    // Post-processing (spec Section 3.3): re-apply the dictionary to catch
+    // anything the LLM missed, then enforce Australian spelling.
+    const cleanedTranscript = postprocess(llmCleaned, dictionary);
 
     return Response.json({ rawTranscript, cleanedTranscript });
   } catch (error: any) {

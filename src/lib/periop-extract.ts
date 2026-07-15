@@ -140,6 +140,24 @@ Output ONLY the corrected letter text, nothing else.`,
   return response.choices[0]?.message?.content?.trim() || letterText;
 }
 
+/**
+ * Cheap, dependency-free heuristic for detecting a password/permission-protected
+ * PDF before sending it to Azure. Azure Document Intelligence cannot parse encrypted
+ * PDF content streams — even ones that open without a password prompt — and returns
+ * an opaque "UnsupportedContent" 400 error for them. Real-world example: PDFs
+ * exported from some hospital admission/referral portals are saved with owner-
+ * password permission restrictions by default. Catching this up front lets us give
+ * the clinician something actionable instead of a raw Azure error dialog.
+ *
+ * This is a heuristic, not a full PDF parser: it scans the raw bytes for the
+ * "/Encrypt" trailer key that PDF encryption dictionaries use. It can very rarely
+ * miss unusual encrypted PDFs, but it will never incorrectly flag a normal
+ * unencrypted PDF, so the worst case if it misses is the same Azure error as today.
+ */
+function isPdfEncrypted(buffer: Buffer): boolean {
+  return buffer.includes(Buffer.from("/Encrypt"));
+}
+
 async function extractTextWithAzureOCR(buffer: Buffer, fileType: string) {
   const endpoint = process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT;
   const key = process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY;
@@ -276,7 +294,20 @@ export async function extractTextFromUploads(input: {
         else if (name.endsWith(".heic") || name.endsWith(".heif")) contentType = "image/heif";
         else contentType = "application/pdf";
       }
-      fileText = await extractTextWithAzureOCR(buffer, contentType);
+      if (contentType === "application/pdf" && isPdfEncrypted(buffer)) {
+        // Known, common failure mode — give a specific, actionable message rather
+        // than letting the raw Azure 400 reach the clinician.
+        fileText = `[Could not read "${file.name}" automatically — this PDF is password/permission-protected, which the OCR service can't open. Please open it, save an unlocked copy (e.g. "Save As" or "Print to PDF" with security removed), and re-upload that copy. The rest of this letter was generated from your other sources.]`;
+      } else {
+        try {
+          fileText = await extractTextWithAzureOCR(buffer, contentType);
+        } catch (ocrError: any) {
+          // Don't let one bad file kill the whole letter — degrade gracefully and
+          // keep going with whatever other sources (files, transcript, pasted text)
+          // are available, same as the unsupported-file-type branch below already does.
+          fileText = `[Could not read "${file.name}" automatically (${ocrError?.message || "OCR failed"}). Please check the file opens normally, or paste its content manually. The rest of this letter was generated from your other sources.]`;
+        }
+      }
     } else {
       fileText = `[File type not supported for OCR: ${file.name} (${mime || "unknown type"}). Please paste the text content manually.]`;
     }

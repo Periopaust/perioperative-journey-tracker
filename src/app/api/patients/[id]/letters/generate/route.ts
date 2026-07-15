@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { extractTextFromUploads, extractClinicalDataWithAI, verifyLetterAgainstSource } from "@/lib/periop-extract";
 import { GENERAL_LETTER_SYSTEM_PROMPT, buildGeneralLetterUserMessage, redactIdentifiers } from "@/lib/letter-template";
+import { loadDictionary } from "@/lib/pipeline/dictionary";
+import { postprocess } from "@/lib/pipeline/postprocess";
 import OpenAI from "openai";
 
 async function generateStructuredLetter(input: {
@@ -109,10 +111,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       providerName: profile?.full_name || "Dr. Vora",
     });
 
-    const letterText = await verifyLetterAgainstSource(draftLetterText, {
+    const verifiedLetterText = await verifyLetterAgainstSource(draftLetterText, {
       extractedClinicalData: redactedClinicalData,
       transcript,
     });
+
+    // Post-processing (spec Section 3.3): shared dictionary re-check + AU
+    // spelling, applied as a final pass without touching the letter's
+    // structure (the fact-checking pass above already ran).
+    const dictionary = await loadDictionary(supabase);
+    const letterText = postprocess(verifiedLetterText, dictionary);
 
     return Response.json({
       letterText,

@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useRef, useTransition } from "react";
+import { useState, useRef, useEffect, useTransition } from "react";
 import {
   Mic, MicOff, Sparkles, Save, Trash2, Plus, X,
   ChevronDown, ChevronUp, ClipboardList, FileText, Copy, Check, ScanLine, BookMarked,
 } from "lucide-react";
 import { saveWardNote, deleteWardNote, updateProblemList, updateWardLocation } from "@/app/actions/patients";
 import { saveVocabularyCorrection } from "@/app/actions/vocabulary";
+import { logDocumentCorrection } from "@/app/actions/corrections";
+import { useSegmentedRecorder } from "@/lib/dictation/useSegmentedRecorder";
+import { safeJson } from "@/lib/http/safeJson";
 
 type WardNote = {
   id: string;
@@ -48,16 +51,14 @@ export default function WardPanel({
   const [noteType, setNoteType] = useState("Progress note");
   const [rawNote, setRawNote] = useState("");
   const [cleanedNote, setCleanedNote] = useState("");
+  const [aiOriginalNote, setAiOriginalNote] = useState<string | null>(null);
   const [showCleaned, setShowCleaned] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Dictation
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
   const [autoFormatting, setAutoFormatting] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const wardSegmentsRef = useRef<Record<number, string>>({});
 
   // Problem list
   const [newProblem, setNewProblem] = useState("");
@@ -76,7 +77,7 @@ export default function WardPanel({
 
   // Generate
   const [generating, setGenerating] = useState<string | null>(null);
-  const [generatedOutput, setGeneratedOutput] = useState<{ type: string; text: string } | null>(null);
+  const [generatedOutput, setGeneratedOutput] = useState<{ type: string; text: string; original: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Timeline collapse
@@ -84,56 +85,67 @@ export default function WardPanel({
 
   // ── Dictation ──────────────────────────────────────────────────────────────
 
-  async function startRecording() {
+  // Dictation is recorded in short segments (not one giant blob) so a
+  // consult of any length can be dictated — each segment is transcribed as
+  // soon as it's ready, then once recording stops the segments are stitched
+  // together in order and sent through the existing AI formatter once.
+  async function handleWardSegment(blob: Blob, index: number) {
+    const fd = new FormData();
+    fd.append("audio", blob, `dictation-${index}.webm`);
+    const res = await fetch("/api/dictation/transcribe", { method: "POST", body: fd });
+    const data = await safeJson(res);
+    if (!res.ok) throw new Error(data.error || `Transcription failed (part ${index + 1})`);
+    wardSegmentsRef.current[index] = data.rawTranscript || "";
+  }
+
+  const {
+    recording,
+    finishing: transcribing,
+    error: dictationError,
+    start: startRecordingSegments,
+    stop: stopRecording,
+  } = useSegmentedRecorder(handleWardSegment);
+
+  function startRecording() {
+    wardSegmentsRef.current = {};
+    startRecordingSegments();
+  }
+
+  async function autoFormatWardNote(combinedRaw: string) {
+    setAutoFormatting(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-
-        // Single combined call: transcribe + format into clinical note in one step
-        setTranscribing(true);
-        try {
-          const form = new FormData();
-          form.append("audio", blob, "dictation.webm");
-          form.append("noteType", noteType);
-          form.append("problemList", JSON.stringify(problemList));
-
-          const res = await fetch(`/api/patients/${patientId}/ward/dictate`, {
-            method: "POST",
-            body: form,
-          });
-          const data = await res.json();
-
-          if (data.rawTranscript) {
-            setRawNote((prev) => prev ? prev + "\n\n" + data.rawTranscript : data.rawTranscript);
-          }
-          if (data.formattedNote) {
-            setCleanedNote(data.formattedNote);
-            setShowCleaned(true);
-          }
-        } catch {
-          // fall through — user sees raw note and can re-format manually
-        } finally {
-          setTranscribing(false);
-          setAutoFormatting(false);
-        }
-      };
-      mr.start();
-      mediaRecorderRef.current = mr;
-      setRecording(true);
+      const res = await fetch(`/api/patients/${patientId}/ward/clean-note`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawNote: combinedRaw, noteType, problemList }),
+      });
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data.error || "AI formatting failed");
+      if (data.cleanedNote) {
+        setCleanedNote(data.cleanedNote);
+        setAiOriginalNote(data.cleanedNote);
+        setShowCleaned(true);
+      }
     } catch {
-      alert("Microphone access denied");
+      // fall through — user still has the raw note and can hit Re-format manually
+    } finally {
+      setAutoFormatting(false);
     }
   }
 
-  function stopRecording() {
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
-  }
+  const wasTranscribingRef = useRef(false);
+  useEffect(() => {
+    if (wasTranscribingRef.current && !transcribing && !recording) {
+      const indices = Object.keys(wardSegmentsRef.current).map(Number).sort((a, b) => a - b);
+      const combinedRaw = indices.map((i) => wardSegmentsRef.current[i]).filter(Boolean).join(" ");
+      if (combinedRaw) {
+        setRawNote((prev) => (prev ? `${prev}\n\n${combinedRaw}` : combinedRaw));
+        autoFormatWardNote(combinedRaw);
+      }
+    }
+    wasTranscribingRef.current = transcribing;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcribing, recording]);
 
   // ── AI Clean ───────────────────────────────────────────────────────────────
 
@@ -146,9 +158,10 @@ export default function WardPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawNote, noteType, problemList }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (data.cleanedNote) {
         setCleanedNote(data.cleanedNote);
+        setAiOriginalNote(data.cleanedNote);
         setShowCleaned(true);
       }
     } finally {
@@ -162,7 +175,10 @@ export default function WardPanel({
     const text = showCleaned ? cleanedNote : rawNote;
     if (!text.trim()) return;
     setSaving(true);
-    const result = await saveWardNote(patientId, noteType, text);
+    // Only diff against the AI output when saving the AI-formatted version —
+    // the raw dictation view has no "AI original" to compare against.
+    const aiOriginal = showCleaned ? aiOriginalNote ?? undefined : undefined;
+    const result = await saveWardNote(patientId, noteType, text, aiOriginal);
     if (!result.error) {
       // Optimistic add — reload will sync properly on next server render
       const newNote: WardNote = {
@@ -175,6 +191,7 @@ export default function WardPanel({
       setNotes((prev) => [newNote, ...prev]);
       setRawNote("");
       setCleanedNote("");
+      setAiOriginalNote(null);
       setShowCleaned(false);
     }
     setSaving(false);
@@ -241,7 +258,7 @@ export default function WardPanel({
         method: "POST",
         body: form,
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (data.extractedText) {
         setRawNote((prev) => prev ? prev + "\n\n--- Scanned document ---\n" + data.extractedText : data.extractedText);
         setShowCleaned(false);
@@ -266,9 +283,9 @@ export default function WardPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (data.output) {
-        setGeneratedOutput({ type, text: data.output });
+        setGeneratedOutput({ type, text: data.output, original: data.output });
       }
     } finally {
       setGenerating(null);
@@ -280,6 +297,13 @@ export default function WardPanel({
     navigator.clipboard.writeText(generatedOutput.text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+
+    // Correction logging (spec Section 3.4): the copy action is the closest
+    // signal we have to "the clinician accepted this version" for documents
+    // that aren't saved to a table.
+    if (generatedOutput.text.trim() !== generatedOutput.original.trim()) {
+      logDocumentCorrection(generatedOutput.original, generatedOutput.text).catch(() => {});
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -399,8 +423,9 @@ export default function WardPanel({
             }`}
           >
             {recording ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-            {transcribing ? "Formatting note…" : recording ? "Stop recording" : "Dictate"}
+            {recording ? "Stop recording" : transcribing ? "Transcribing…" : autoFormatting ? "Formatting note…" : "Dictate"}
           </button>
+          {dictationError && <span className="text-xs text-rose-600">{dictationError}</span>}
 
           {/* Scan document */}
           <label className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border cursor-pointer transition ${scanning ? "border-amber-200 text-amber-600 opacity-70" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>

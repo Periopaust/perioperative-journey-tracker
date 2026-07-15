@@ -5,6 +5,7 @@ import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/checklist";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import OpenAI from "openai";
+import { diffAndLogCorrections } from "@/lib/pipeline/corrections";
 
 export async function createPatient(formData: FormData) {
   const supabase = await createClient();
@@ -213,6 +214,7 @@ export async function saveWardNote(
   patientId: string,
   noteType: string,
   noteText: string,
+  aiOriginalText?: string,
 ): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -234,6 +236,17 @@ export async function saveWardNote(
 
   if (error) return { error: error.message };
   revalidatePath(`/patients/${patientId}`);
+
+  // Correction logging (spec Section 3.4): if the clinician edited the AI
+  // dictation/format output before saving, log what changed.
+  if (aiOriginalText && aiOriginalText.trim() !== noteText.trim()) {
+    diffAndLogCorrections(supabase, {
+      originalText: aiOriginalText,
+      correctedText: noteText,
+      userId: user.id,
+    }).catch(() => {});
+  }
+
   return {};
 }
 

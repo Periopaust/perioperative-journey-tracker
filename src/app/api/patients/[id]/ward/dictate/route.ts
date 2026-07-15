@@ -1,4 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { loadDictionary, preprocess } from "@/lib/pipeline/dictionary";
+import { postprocess } from "@/lib/pipeline/postprocess";
+import { getAppConfig } from "@/lib/pipeline/prompt";
 
 async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string> {
   const key = process.env.AZURE_SPEECH_KEY;
@@ -230,16 +233,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: "No speech detected in recording" }, { status: 422 });
   }
 
-  // Step 2: Fetch patient context + vocabulary corrections in parallel
-  const [{ data: patient }, { data: glossaryData }] = await Promise.all([
+  // Step 2: Fetch patient context + the shared correction dictionary in parallel
+  const [{ data: patient }, dictionary, appConfig] = await Promise.all([
     supabase.from("patients").select("ward_location, planned_surgery").eq("id", patientId).single(),
-    supabase.from("vocabulary_corrections").select("wrong_term, correct_term"),
+    loadDictionary(supabase),
+    getAppConfig(supabase),
   ]);
 
-  const glossary = glossaryData ?? [];
+  const glossary = dictionary.map((d) => ({ wrong_term: d.variant, correct_term: d.canonical }));
+
+  // Pre-processing (spec Section 3.1): fuzzy-match the raw dictation against
+  // the shared dictionary before it reaches the LLM.
+  const preprocessed = preprocess(rawTranscript, dictionary);
 
   // Step 3: Format directly into structured clinical note (single AI call)
-  const prompt = buildClinicalNotePrompt(rawTranscript, noteType, problemList, patient, glossary);
+  const prompt = buildClinicalNotePrompt(preprocessed, noteType, problemList, patient, glossary);
 
   const aiRes = await fetch(
     `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-10-21`,
@@ -250,7 +258,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         messages: [
           {
             role: "system",
-            content: "You convert rough Australian physician dictation into structured consultant physician documentation.",
+            content: appConfig.systemPrompt,
           },
           { role: "user", content: prompt },
         ],
@@ -265,7 +273,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const aiData = await aiRes.json();
-  const formattedNote = aiData.choices?.[0]?.message?.content || "";
+  const rawFormattedNote = aiData.choices?.[0]?.message?.content || "";
+
+  // Post-processing (spec Section 3.3): dictionary re-check + AU spelling.
+  const formattedNote = postprocess(rawFormattedNote, dictionary);
 
   return Response.json({ rawTranscript, formattedNote });
 }

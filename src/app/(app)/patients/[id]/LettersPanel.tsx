@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, Upload, Copy, Sparkles, BookMarked, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { saveLetterDraft, updateLetterStatus, updateLetterContent, deleteLetter, addLetterNote, getLetterSignedUrl } from "@/app/actions/letters";
 import { saveVocabularyCorrection } from "@/app/actions/vocabulary";
+import { useSegmentedRecorder } from "@/lib/dictation/useSegmentedRecorder";
+import { safeJson } from "@/lib/http/safeJson";
 
 type Letter = {
   id: string;
@@ -79,13 +81,50 @@ export default function LettersPanel({
   const [savingContent, setSavingContent] = useState("");
 
   // Dictation
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
   const [rawTranscript, setRawTranscript] = useState("");
   const [originalCleanedTranscript, setOriginalCleanedTranscript] = useState("");
-  const [dictationError, setDictationError] = useState("");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<BlobPart[]>([]);
+  const dictationSegmentsRef = useRef<Record<number, { raw: string; cleaned: string }>>({});
+
+  async function handleDictationSegment(blob: Blob, index: number) {
+    const fd = new FormData();
+    fd.append("audio", blob, `dictation-${index}.webm`);
+    const res = await fetch("/api/dictation/transcribe", { method: "POST", body: fd });
+    const data = await safeJson(res);
+    if (!res.ok) throw new Error(data.error || `Transcription failed (part ${index + 1})`);
+    dictationSegmentsRef.current[index] = { raw: data.rawTranscript || "", cleaned: data.cleanedTranscript || "" };
+  }
+
+  const {
+    recording,
+    finishing: transcribing,
+    error: dictationError,
+    start: startRecordingSegments,
+    stop: stopRecording,
+  } = useSegmentedRecorder(handleDictationSegment);
+
+  function startRecording() {
+    dictationSegmentsRef.current = {};
+    startRecordingSegments();
+  }
+
+  // Once every segment from a recording session has finished uploading and
+  // transcribing, stitch them back together in order and drop them into the
+  // transcript. This runs no matter how many segments a long dictation
+  // produced, so there's no cap on how long a consult recording can be.
+  const wasTranscribingRef = useRef(false);
+  useEffect(() => {
+    if (wasTranscribingRef.current && !transcribing && !recording) {
+      const indices = Object.keys(dictationSegmentsRef.current).map(Number).sort((a, b) => a - b);
+      if (indices.length > 0) {
+        const rawCombined = indices.map((i) => dictationSegmentsRef.current[i].raw).filter(Boolean).join(" ");
+        const cleanedCombined = indices.map((i) => dictationSegmentsRef.current[i].cleaned).filter(Boolean).join("\n\n");
+        setRawTranscript(rawCombined);
+        setOriginalCleanedTranscript((p) => (p.trim() ? `${p}\n\n${cleanedCombined}` : cleanedCombined));
+        setTranscript((p) => (p.trim() ? `${p.trim()}\n\n${cleanedCombined}` : cleanedCombined));
+      }
+    }
+    wasTranscribingRef.current = transcribing;
+  }, [transcribing, recording]);
 
   // Command mic
   const [commandRecording, setCommandRecording] = useState(false);
@@ -100,50 +139,6 @@ export default function LettersPanel({
   const [teachCategory, setTeachCategory] = useState("medication");
   const [teachSaving, setTeachSaving] = useState(false);
   const [teachMessage, setTeachMessage] = useState("");
-
-  // ── Dictation ────────────────────────────────────────────────────────────────
-
-  async function startRecording() {
-    setDictationError("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        await handleTranscribe(new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" }));
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-    } catch (err: any) {
-      setDictationError(err.message || "Could not access microphone");
-    }
-  }
-
-  function stopRecording() { mediaRecorderRef.current?.stop(); setRecording(false); }
-
-  async function handleTranscribe(audioBlob: Blob) {
-    setTranscribing(true);
-    setRawTranscript("");
-    setDictationError("");
-    try {
-      const fd = new FormData();
-      fd.append("audio", audioBlob, "dictation.webm");
-      const res = await fetch("/api/dictation/transcribe", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Transcription failed");
-      setRawTranscript(data.rawTranscript || "");
-      const cleaned = data.cleanedTranscript || "";
-      setOriginalCleanedTranscript((p) => p.trim() ? `${p}\n\n${cleaned}` : cleaned);
-      setTranscript((p) => p.trim() ? `${p.trim()}\n\n${cleaned}` : cleaned);
-    } catch (err: any) {
-      setDictationError(err.message);
-    } finally {
-      setTranscribing(false);
-    }
-  }
 
   // ── Command mic ──────────────────────────────────────────────────────────────
 
@@ -160,7 +155,7 @@ export default function LettersPanel({
           const fd = new FormData();
           fd.append("audio", new Blob(commandChunksRef.current, { type: recorder.mimeType || "audio/webm" }), "command.webm");
           const res = await fetch("/api/dictation/transcribe", { method: "POST", body: fd });
-          const data = await res.json();
+          const data = await safeJson(res);
           if (!res.ok) throw new Error(data.error || "Transcription failed");
           setCommand(data.rawTranscript || "");
         } catch (err: any) {
@@ -199,7 +194,7 @@ export default function LettersPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawNote, noteType }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setLetterText(data.cleanedNote || "");
     } catch (err: any) {
@@ -231,7 +226,7 @@ export default function LettersPanel({
     setSaveMessage("");
     try {
       const res = await fetch(`/api/patients/${patientId}/letters/generate`, { method: "POST", body: buildFormData() });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setLetterText(data.letterText || "");
       setAiData(data.aiData || null);
@@ -259,7 +254,7 @@ export default function LettersPanel({
       const fd = buildFormData();
       fd.append("command", command);
       const res = await fetch(`/api/patients/${patientId}/letters/generate-command`, { method: "POST", body: fd });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setLetterText(data.letterText || "");
       setAiData(data.aiData || null);
@@ -285,6 +280,7 @@ export default function LettersPanel({
         isPeriopLetter,
         { priority, letter_to: letterTo, recipient_name: recipientName, recipient_address: recipientAddress, cc, template }
       );
+      if ("error" in result && result.error) throw new Error(result.error);
       setSaveMessage(`Saved as ${result.letterCode}`);
       router.refresh();
     } catch (err: any) {

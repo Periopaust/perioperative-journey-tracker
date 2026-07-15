@@ -1,6 +1,7 @@
 import { getCurrentProfile } from "@/lib/auth";
 import { notFound } from "next/navigation";
 import AdminPurgePanel from "./AdminPurgePanel";
+import CorrectionsPanel from "./CorrectionsPanel";
 
 export default async function AdminPage() {
   const profile = await getCurrentProfile();
@@ -10,6 +11,7 @@ export default async function AdminPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold tracking-tight text-slate-800">Admin</h1>
       <AdminPurgePanel />
+      <CorrectionsPanel />
     </div>
   );
 }

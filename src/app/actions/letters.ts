@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { letterTextToDocxBuffer } from "@/lib/letter-docx";
 import { revalidatePath } from "next/cache";
 import { extractAndUpdateBloods } from "./patients";
+import { diffAndLogCorrections } from "@/lib/pipeline/corrections";
 
 export async function saveLetterDraft(
   patientId: string,
@@ -20,67 +21,77 @@ export async function saveLetterDraft(
   }
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
 
-  const { data: patient } = await supabase
-    .from("patients")
-    .select("ur_number")
-    .eq("id", patientId)
-    .single();
+  // Next.js redacts the real error message from a thrown Server Action error
+  // in production (the client only ever sees a generic "error occurred in
+  // the Server Components render" digest). To keep the actual failure
+  // reason visible in the UI, this action catches its own errors and
+  // returns `{ error }` instead of throwing.
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: "Not authenticated" };
 
-  if (!patient) throw new Error("Patient not found");
+    const { data: patient } = await supabase
+      .from("patients")
+      .select("ur_number")
+      .eq("id", patientId)
+      .single();
 
-  const { data: existingLetters } = await supabase
-    .from("letters")
-    .select("letter_code")
-    .eq("patient_id", patientId)
-    .like("letter_code", `${patient.ur_number}-L%`);
+    if (!patient) return { error: "Patient not found" };
 
-  const prefix = `${patient.ur_number}-L`;
-  const maxSeq = (existingLetters || []).reduce((max, row) => {
-    const seq = parseInt(row.letter_code.slice(prefix.length), 10);
-    return Number.isFinite(seq) && seq > max ? seq : max;
-  }, 0);
+    const { data: existingLetters } = await supabase
+      .from("letters")
+      .select("letter_code")
+      .eq("patient_id", patientId)
+      .like("letter_code", `${patient.ur_number}-L%`);
 
-  const letterCode = `${prefix}${maxSeq + 1}`;
-  const docxPath = `${patient.ur_number}/${letterCode}.docx`;
+    const prefix = `${patient.ur_number}-L`;
+    const maxSeq = (existingLetters || []).reduce((max, row) => {
+      const seq = parseInt(row.letter_code.slice(prefix.length), 10);
+      return Number.isFinite(seq) && seq > max ? seq : max;
+    }, 0);
 
-  const docxBuffer = await letterTextToDocxBuffer(letterText, isPeriopLetter);
+    const letterCode = `${prefix}${maxSeq + 1}`;
+    const docxPath = `${patient.ur_number}/${letterCode}.docx`;
 
-  const { error: uploadError } = await supabase.storage
-    .from("patient-letters")
-    .upload(docxPath, docxBuffer, {
-      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      upsert: false,
+    const docxBuffer = await letterTextToDocxBuffer(letterText, isPeriopLetter);
+
+    const { error: uploadError } = await supabase.storage
+      .from("patient-letters")
+      .upload(docxPath, docxBuffer, {
+        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: false,
+      });
+
+    if (uploadError) return { error: `Could not upload document: ${uploadError.message}` };
+
+    const { error: insertError } = await supabase.from("letters").insert({
+      patient_id: patientId,
+      letter_code: letterCode,
+      procedure_type: procedureType || null,
+      content: letterText,
+      docx_path: docxPath,
+      status: "draft",
+      created_by: user.id,
+      priority: meta?.priority || "routine",
+      letter_to: meta?.letter_to || "doctor",
+      recipient_name: meta?.recipient_name || null,
+      recipient_address: meta?.recipient_address || null,
+      cc: meta?.cc || null,
+      template: meta?.template || null,
     });
 
-  if (uploadError) throw uploadError;
+    if (insertError) return { error: `Could not save letter: ${insertError.message}` };
 
-  const { error: insertError } = await supabase.from("letters").insert({
-    patient_id: patientId,
-    letter_code: letterCode,
-    procedure_type: procedureType || null,
-    content: letterText,
-    docx_path: docxPath,
-    status: "draft",
-    created_by: user.id,
-    priority: meta?.priority || "routine",
-    letter_to: meta?.letter_to || "doctor",
-    recipient_name: meta?.recipient_name || null,
-    recipient_address: meta?.recipient_address || null,
-    cc: meta?.cc || null,
-    template: meta?.template || null,
-  });
+    revalidatePath(`/patients/${patientId}`);
 
-  if (insertError) throw insertError;
+    // Silently scan letter for blood test mentions and auto-update patient status
+    extractAndUpdateBloods(patientId, letterText).catch(() => {});
 
-  revalidatePath(`/patients/${patientId}`);
-
-  // Silently scan letter for blood test mentions and auto-update patient status
-  extractAndUpdateBloods(patientId, letterText).catch(() => {});
-
-  return { letterCode };
+    return { letterCode };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : "Failed to save letter" };
+  }
 }
 
 export async function updateLetterStatus(letterId: string, patientId: string, status: "draft" | "reviewed" | "sent") {
@@ -116,6 +127,10 @@ export async function updateLetterContent(letterId: string, patientId: string, c
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  // Grab the pre-edit content so we can log what the clinician actually
+  // changed (spec Section 3.4) before it's overwritten.
+  const { data: existing } = await supabase.from("letters").select("content").eq("id", letterId).single();
+
   const { error } = await supabase.from("letters").update({ content }).eq("id", letterId);
   if (error) throw error;
 
@@ -123,6 +138,15 @@ export async function updateLetterContent(letterId: string, patientId: string, c
 
   // Re-scan edited letter for updated blood test mentions
   extractAndUpdateBloods(patientId, content).catch(() => {});
+
+  // Correction logging: diff the AI/previous draft against what was saved.
+  if (existing?.content) {
+    diffAndLogCorrections(supabase, {
+      originalText: existing.content,
+      correctedText: content,
+      userId: user.id,
+    }).catch(() => {});
+  }
 }
 
 export async function addLetterNote(letterId: string, patientId: string, notes: string) {

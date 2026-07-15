@@ -1,4 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { loadDictionary, preprocess } from "@/lib/pipeline/dictionary";
+import { postprocess } from "@/lib/pipeline/postprocess";
+import { getAppConfig } from "@/lib/pipeline/prompt";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
@@ -16,15 +19,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: "Azure OpenAI not configured" }, { status: 500 });
   }
 
-  const { data: patient } = await supabase
-    .from("patients")
-    .select("full_name, date_of_birth, ward_location, planned_surgery")
-    .eq("id", patientId)
-    .single();
+  const [{ data: patient }, dictionary, appConfig] = await Promise.all([
+    supabase
+      .from("patients")
+      .select("full_name, date_of_birth, ward_location, planned_surgery")
+      .eq("id", patientId)
+      .single(),
+    loadDictionary(supabase),
+    getAppConfig(supabase),
+  ]);
 
   const activeProblems = Array.isArray(problemList) && problemList.length > 0
     ? problemList.map((p: string) => `- ${p}`).join("\n")
     : "No active problem list documented.";
+
+  // Pre-processing (spec Section 3.1): fuzzy-match the raw note against the
+  // shared dictionary before it reaches the LLM.
+  const preprocessedNote = preprocess(rawNote, dictionary);
 
   const prompt = `You are an experienced Australian Consultant Physician.
 
@@ -50,7 +61,7 @@ ${activeProblems}
 NOTE TYPE: ${noteType}
 
 RAW DICTATION
-${rawNote}
+${preprocessedNote}
 
 FORMAT INSTRUCTIONS
 
@@ -130,7 +141,7 @@ Return only the completed note.`;
       headers: { "Content-Type": "application/json", "api-key": apiKey },
       body: JSON.stringify({
         messages: [
-          { role: "system", content: "You convert Australian physician dictation into structured consultant physician documentation." },
+          { role: "system", content: appConfig.systemPrompt },
           { role: "user", content: prompt },
         ],
         temperature: 0.2,
@@ -144,6 +155,10 @@ Return only the completed note.`;
   }
 
   const data = await response.json();
-  const cleanedNote = data.choices?.[0]?.message?.content ?? "";
+  const rawCleanedNote = data.choices?.[0]?.message?.content ?? "";
+
+  // Post-processing (spec Section 3.3): dictionary re-check + AU spelling.
+  const cleanedNote = postprocess(rawCleanedNote, dictionary);
+
   return Response.json({ cleanedNote });
 }

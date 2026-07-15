@@ -1,4 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { loadDictionary } from "@/lib/pipeline/dictionary";
+import { postprocess } from "@/lib/pipeline/postprocess";
+import { getAppConfig } from "@/lib/pipeline/prompt";
 
 const PROMPTS: Record<string, (ctx: GenerateContext) => string> = {
   "Allied Health Summary": (ctx) => `You are an Australian consultant physician generating an allied health referral summary.
@@ -178,7 +181,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: "Azure OpenAI not configured" }, { status: 500 });
   }
 
-  const [{ data: patient }, { data: notes }] = await Promise.all([
+  const [{ data: patient }, { data: notes }, dictionary, appConfig] = await Promise.all([
     supabase
       .from("patients")
       .select("ward_location, planned_surgery, problem_list")
@@ -189,6 +192,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .select("note_type, note_text, created_at, author_name")
       .eq("patient_id", patientId)
       .order("created_at", { ascending: true }),
+    loadDictionary(supabase),
+    getAppConfig(supabase),
   ]);
 
   const problemList = Array.isArray(patient?.problem_list) && patient.problem_list.length > 0
@@ -215,7 +220,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       headers: { "Content-Type": "application/json", "api-key": apiKey },
       body: JSON.stringify({
         messages: [
-          { role: "system", content: "You generate structured Australian consultant physician clinical documents from ward notes." },
+          { role: "system", content: appConfig.systemPrompt },
           { role: "user", content: prompt },
         ],
         temperature: 0.2,
@@ -229,6 +234,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const data = await response.json();
-  const output = data.choices?.[0]?.message?.content ?? "";
+  const rawOutput = data.choices?.[0]?.message?.content ?? "";
+
+  // Post-processing (spec Section 3.3): dictionary re-check + AU spelling.
+  const output = postprocess(rawOutput, dictionary);
+
   return Response.json({ output });
 }
