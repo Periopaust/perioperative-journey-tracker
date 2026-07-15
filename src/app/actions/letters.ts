@@ -56,11 +56,17 @@ export async function saveLetterDraft(
 
     const docxBuffer = await letterTextToDocxBuffer(letterText, isPeriopLetter);
 
+    // upsert: true — the letter number is computed from existing DB rows,
+    // not from what's already in storage, so if an earlier save attempt
+    // uploaded the docx but failed before the DB insert (e.g. a race or a
+    // transient error), a retry recomputes the same code and path. Without
+    // upsert this fails with "The resource already exists" and blocks the
+    // clinician from ever saving that letter.
     const { error: uploadError } = await supabase.storage
       .from("patient-letters")
       .upload(docxPath, docxBuffer, {
         contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        upsert: false,
+        upsert: true,
       });
 
     if (uploadError) return { error: `Could not upload document: ${uploadError.message}` };
