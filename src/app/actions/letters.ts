@@ -52,42 +52,65 @@ export async function saveLetterDraft(
     }, 0);
 
     const letterCode = `${prefix}${maxSeq + 1}`;
-    const docxPath = `${patient.ur_number}/${letterCode}.docx`;
 
+    // Insert the DB row first so we get a guaranteed-unique row id, and key
+    // the storage filename off that id rather than off the sequential
+    // letter code alone. The "patient-letters" storage bucket only has
+    // INSERT/SELECT RLS policies (no UPDATE), so `upsert: true` on the
+    // upload fails with "new row violates row-level security policy" the
+    // moment there's an actual name collision — and a plain `upsert: false`
+    // fails with "the resource already exists" if a previous attempt
+    // uploaded to that same code-based path but didn't finish saving the
+    // row. Keying the filename off a fresh row id means every save attempt
+    // gets its own path, so it can never collide with a stuck earlier one.
+    const { data: inserted, error: insertError } = await supabase
+      .from("letters")
+      .insert({
+        patient_id: patientId,
+        letter_code: letterCode,
+        procedure_type: procedureType || null,
+        content: letterText,
+        docx_path: null,
+        status: "draft",
+        created_by: user.id,
+        priority: meta?.priority || "routine",
+        letter_to: meta?.letter_to || "doctor",
+        recipient_name: meta?.recipient_name || null,
+        recipient_address: meta?.recipient_address || null,
+        cc: meta?.cc || null,
+        template: meta?.template || null,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !inserted) {
+      return { error: `Could not save letter: ${insertError?.message || "unknown error"}` };
+    }
+
+    const docxPath = `${patient.ur_number}/${letterCode}-${inserted.id}.docx`;
     const docxBuffer = await letterTextToDocxBuffer(letterText, isPeriopLetter);
 
-    // upsert: true — the letter number is computed from existing DB rows,
-    // not from what's already in storage, so if an earlier save attempt
-    // uploaded the docx but failed before the DB insert (e.g. a race or a
-    // transient error), a retry recomputes the same code and path. Without
-    // upsert this fails with "The resource already exists" and blocks the
-    // clinician from ever saving that letter.
     const { error: uploadError } = await supabase.storage
       .from("patient-letters")
       .upload(docxPath, docxBuffer, {
         contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        upsert: true,
+        upsert: false,
       });
 
-    if (uploadError) return { error: `Could not upload document: ${uploadError.message}` };
+    if (uploadError) {
+      // Don't leave behind a draft row with no document attached.
+      await supabase.from("letters").delete().eq("id", inserted.id);
+      return { error: `Could not upload document: ${uploadError.message}` };
+    }
 
-    const { error: insertError } = await supabase.from("letters").insert({
-      patient_id: patientId,
-      letter_code: letterCode,
-      procedure_type: procedureType || null,
-      content: letterText,
-      docx_path: docxPath,
-      status: "draft",
-      created_by: user.id,
-      priority: meta?.priority || "routine",
-      letter_to: meta?.letter_to || "doctor",
-      recipient_name: meta?.recipient_name || null,
-      recipient_address: meta?.recipient_address || null,
-      cc: meta?.cc || null,
-      template: meta?.template || null,
-    });
+    const { error: updateError } = await supabase
+      .from("letters")
+      .update({ docx_path: docxPath })
+      .eq("id", inserted.id);
 
-    if (insertError) return { error: `Could not save letter: ${insertError.message}` };
+    if (updateError) {
+      return { error: `Document uploaded but could not finalise the letter record: ${updateError.message}` };
+    }
 
     revalidatePath(`/patients/${patientId}`);
 
