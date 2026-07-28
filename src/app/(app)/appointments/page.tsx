@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { getCurrentProfile } from "@/lib/auth";
 import { getCurrentSchedulingProfile } from "@/lib/scheduling/auth";
+import { createClient } from "@/lib/supabase/server";
 import { bootstrapScheduling } from "@/app/actions/scheduling";
 
 export default async function AppointmentsPage({
@@ -54,19 +56,47 @@ export default async function AppointmentsPage({
     );
   }
 
+  const supabase = await createClient();
+  const [{ count: providerCount }, { count: locationCount }] = await Promise.all([
+    supabase
+      .schema("scheduling")
+      .from("providers")
+      .select("id", { count: "exact", head: true }),
+    supabase
+      .schema("scheduling")
+      .from("locations")
+      .select("id", { count: "exact", head: true }),
+  ]);
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold tracking-tight text-slate-800">Appointments</h1>
-      <div className="rounded-lg border border-gray-200 bg-white p-5">
+      <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-1">
         <p className="text-sm text-gray-600">
           Signed in as <span className="font-medium text-gray-900">{schedulingProfile.full_name}</span>{" "}
           · <span className="capitalize">{schedulingProfile.role}</span>
         </p>
-        <p className="text-sm text-gray-500 mt-2">
-          The calendar view (day/week grid, provider columns, availability, and booking)
-          is being built next. This page confirms the Appointments section is wired up
-          end-to-end: same login, its own database schema, role-based access.
+        <p className="text-sm text-gray-500">
+          The calendar view (day/week grid and booking) is being built next. Set up your
+          providers and locations here first — the calendar needs at least one of each.
         </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
+        <Link
+          href="/appointments/providers"
+          className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+        >
+          <p className="text-sm font-medium text-gray-900">Providers</p>
+          <p className="text-xs text-gray-500 mt-1">{providerCount ?? 0} added</p>
+        </Link>
+        <Link
+          href="/appointments/locations"
+          className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+        >
+          <p className="text-sm font-medium text-gray-900">Locations</p>
+          <p className="text-xs text-gray-500 mt-1">{locationCount ?? 0} added</p>
+        </Link>
       </div>
     </div>
   );
