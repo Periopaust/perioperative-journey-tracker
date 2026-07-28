@@ -72,6 +72,7 @@ export default async function AppointmentsPage({
       .select("id", { count: "exact", head: true })
       .eq("active", true),
   ]);
+  const hasAvailability = (availabilityCount ?? 0) > 0;
 
   return (
     <div className="space-y-4">
@@ -82,12 +83,12 @@ export default async function AppointmentsPage({
           · <span className="capitalize">{schedulingProfile.role}</span>
         </p>
         <p className="text-sm text-gray-500">
-          The calendar view (day/week grid and booking) is being built next. Set up your
-          providers, locations, and their weekly hours here first.
+          The calendar view is a read-only preview for now — booking isn&apos;t wired up yet. Set up
+          your providers, locations, and their weekly hours here first.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3 max-w-2xl">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 max-w-3xl">
         <Link
           href="/appointments/providers"
           className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
@@ -108,6 +109,15 @@ export default async function AppointmentsPage({
         >
           <p className="text-sm font-medium text-gray-900">Availability</p>
           <p className="text-xs text-gray-500 mt-1">{availabilityCount ?? 0} rules set</p>
+        </Link>
+        <Link
+          href="/appointments/calendar"
+          className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+        >
+          <p className="text-sm font-medium text-gray-900">Calendar</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {hasAvailability ? "Read-only preview" : "Nothing to show yet"}
+          </p>
         </Link>
       </div>
     </div>
