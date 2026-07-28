@@ -75,51 +75,72 @@ export function AvailabilityWeekCalendar({
       // concrete, so they're just filtered to the visible range.
       fetchEvents: async ({ start, end }) => {
         const events: CalendarEvent[] = [];
-        let date = start.toPlainDate();
-        const endDate = end.toPlainDate();
 
-        while (Temporal.PlainDate.compare(date, endDate) <= 0) {
-          for (const rule of rules) {
-            if (toIsoWeekday(rule.day_of_week) !== date.dayOfWeek) continue;
-            if (Temporal.PlainDate.compare(date, Temporal.PlainDate.from(rule.effective_from)) < 0) continue;
-            if (
-              rule.effective_until &&
-              Temporal.PlainDate.compare(date, Temporal.PlainDate.from(rule.effective_until)) > 0
-            ) {
-              continue;
+        // Each item is expanded independently and wrapped in its own
+        // try/catch: one malformed rule or appointment (e.g. an
+        // unparseable timestamp) should never be able to wipe out every
+        // other event on the calendar for the whole visible range. Any
+        // failure is logged to the browser console so it's diagnosable
+        // instead of just silently rendering a blank grid.
+        try {
+          let date = start.toPlainDate();
+          const endDate = end.toPlainDate();
+
+          while (Temporal.PlainDate.compare(date, endDate) <= 0) {
+            for (const rule of rules) {
+              try {
+                if (toIsoWeekday(rule.day_of_week) !== date.dayOfWeek) continue;
+                if (Temporal.PlainDate.compare(date, Temporal.PlainDate.from(rule.effective_from)) < 0) continue;
+                if (
+                  rule.effective_until &&
+                  Temporal.PlainDate.compare(date, Temporal.PlainDate.from(rule.effective_until)) > 0
+                ) {
+                  continue;
+                }
+
+                const locationName = locationNameById.get(rule.location_id);
+
+                events.push({
+                  id: `${rule.id}_${date.toString()}`,
+                  start: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(rule.start_local_time) }),
+                  end: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(rule.end_local_time) }),
+                  title: providerName,
+                  location: locationName,
+                });
+              } catch (ruleError) {
+                console.error("[calendar] failed to expand availability rule", rule.id, "for", date.toString(), ruleError);
+              }
             }
-
-            const locationName = locationNameById.get(rule.location_id);
-
-            events.push({
-              id: `${rule.id}_${date.toString()}`,
-              start: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(rule.start_local_time) }),
-              end: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(rule.end_local_time) }),
-              title: providerName,
-              location: locationName,
-            });
+            date = date.add({ days: 1 });
           }
-          date = date.add({ days: 1 });
+        } catch (rulesError) {
+          console.error("[calendar] failed to expand availability rules", rulesError);
         }
 
         for (const appointment of appointments) {
-          const appointmentStart = Temporal.Instant.from(appointment.start_at).toZonedDateTimeISO(timezone);
-          const appointmentEnd = Temporal.Instant.from(appointment.end_at).toZonedDateTimeISO(timezone);
-          if (Temporal.ZonedDateTime.compare(appointmentEnd, start) < 0) continue;
-          if (Temporal.ZonedDateTime.compare(appointmentStart, end) > 0) continue;
+          try {
+            const appointmentStart = Temporal.Instant.from(appointment.start_at).toZonedDateTimeISO(timezone);
+            const appointmentEnd = Temporal.Instant.from(appointment.end_at).toZonedDateTimeISO(timezone);
+            if (Temporal.ZonedDateTime.compare(appointmentEnd, start) < 0) continue;
+            if (Temporal.ZonedDateTime.compare(appointmentStart, end) > 0) continue;
 
-          const typeName = appointmentTypeNameById.get(appointment.appointment_type_id);
-          const locationName = locationNameById.get(appointment.location_id);
+            const typeName = appointmentTypeNameById.get(appointment.appointment_type_id);
+            const locationName = locationNameById.get(appointment.location_id);
 
-          events.push({
-            id: `appointment_${appointment.id}`,
-            start: appointmentStart,
-            end: appointmentEnd,
-            title: typeName ? `${appointment.contact_name} — ${typeName}` : appointment.contact_name,
-            location: locationName,
-            calendarId: "booked",
-          });
+            events.push({
+              id: `appointment_${appointment.id}`,
+              start: appointmentStart,
+              end: appointmentEnd,
+              title: typeName ? `${appointment.contact_name} — ${typeName}` : appointment.contact_name,
+              location: locationName,
+              calendarId: "booked",
+            });
+          } catch (appointmentError) {
+            console.error("[calendar] failed to render appointment", appointment.id, appointmentError);
+          }
         }
+
+        console.log(`[calendar] fetchEvents ${start.toString()} – ${end.toString()}: ${events.length} events (rules=${rules.length}, appointments=${appointments.length})`);
 
         return events;
       },
