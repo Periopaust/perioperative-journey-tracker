@@ -1,0 +1,73 @@
+import { getCurrentProfile } from "@/lib/auth";
+import { getCurrentSchedulingProfile } from "@/lib/scheduling/auth";
+import { bootstrapScheduling } from "@/app/actions/scheduling";
+
+export default async function AppointmentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+  const journeyProfile = await getCurrentProfile();
+  const schedulingProfile = await getCurrentSchedulingProfile();
+
+  if (!schedulingProfile) {
+    return (
+      <div className="max-w-lg space-y-4">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Appointments</h1>
+
+        {error && (
+          <p className="rounded-md bg-red-50 text-red-700 text-sm px-3 py-2">{error}</p>
+        )}
+
+        {journeyProfile?.role === "admin" ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
+            <p className="text-sm text-gray-600">
+              Appointments hasn&apos;t been set up for your practice yet. This creates the
+              scheduling workspace and gives you admin access to it — providers and
+              secretaries are added from here afterwards.
+            </p>
+            <form action={bootstrapScheduling} className="space-y-3">
+              <label className="block text-sm">
+                <span className="text-gray-700">Practice name</span>
+                <input
+                  name="organisation_name"
+                  defaultValue="Perioperative Australia"
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <button
+                type="submit"
+                className="rounded-md bg-brand-teal text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"
+              >
+                Set up Appointments
+              </button>
+            </form>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600">
+            Appointments hasn&apos;t been set up for your practice yet. Ask your admin to
+            open this page and set it up, then they can grant you access.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold tracking-tight text-slate-800">Appointments</h1>
+      <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <p className="text-sm text-gray-600">
+          Signed in as <span className="font-medium text-gray-900">{schedulingProfile.full_name}</span>{" "}
+          · <span className="capitalize">{schedulingProfile.role}</span>
+        </p>
+        <p className="text-sm text-gray-500 mt-2">
+          The calendar view (day/week grid, provider columns, availability, and booking)
+          is being built next. This page confirms the Appointments section is wired up
+          end-to-end: same login, its own database schema, role-based access.
+        </p>
+      </div>
+    </div>
+  );
+}

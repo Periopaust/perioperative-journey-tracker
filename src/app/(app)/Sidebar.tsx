@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, ShieldCheck, Route, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ShieldCheck, Route, CalendarDays, type LucideIcon } from "lucide-react";
 
 const NAV_ITEMS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/patients", label: "Patients", icon: Users },
+  { href: "/appointments", label: "Appointments", icon: CalendarDays },
 ];
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
