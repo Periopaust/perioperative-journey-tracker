@@ -26,41 +26,81 @@ export default async function CalendarPage({
   }
 
   const supabase = await createClient();
-  const [{ data: providers }, { data: locations }, { data: rules }, { data: organisation }] = await Promise.all([
-    supabase.schema("scheduling").from("providers").select("id, display_name").order("display_name"),
-    supabase.schema("scheduling").from("locations").select("id, name").order("name"),
-    supabase
-      .schema("scheduling")
-      .from("availability_rules")
-      .select("id, provider_id, location_id, day_of_week, start_local_time, end_local_time, effective_from, effective_until")
-      .eq("active", true),
-    supabase
-      .schema("scheduling")
-      .from("organisations")
-      .select("default_timezone")
-      .eq("id", schedulingProfile.organisation_id)
-      .single(),
-  ]);
+  const nowIso = new Date().toISOString();
+  const [
+    { data: providers, error: providersError },
+    { data: locations, error: locationsError },
+    { data: rules, error: rulesError },
+    { data: appointmentTypes, error: appointmentTypesError },
+    { data: appointments, error: appointmentsError },
+    { data: organisation, error: organisationError },
+  ] = await Promise.all([
+      supabase.schema("scheduling").from("providers").select("id, display_name").order("display_name"),
+      supabase.schema("scheduling").from("locations").select("id, name").order("name"),
+      supabase
+        .schema("scheduling")
+        .from("availability_rules")
+        .select("id, provider_id, location_id, day_of_week, start_local_time, end_local_time, effective_from, effective_until")
+        .eq("active", true),
+      supabase.schema("scheduling").from("appointment_types").select("id, name").eq("active", true),
+      supabase
+        .schema("scheduling")
+        .from("appointments")
+        .select("id, provider_id, location_id, appointment_type_id, start_at, end_at, contact_name")
+        .neq("status", "cancelled")
+        .gte("end_at", nowIso),
+      supabase
+        .schema("scheduling")
+        .from("organisations")
+        .select("default_timezone")
+        .eq("id", schedulingProfile.organisation_id)
+        .single(),
+    ]);
+
+  // These are non-fatal (the page below already falls back to empty
+  // arrays/defaults for each), but any Postgres/RLS error here would
+  // otherwise fail completely silently — surface it in Vercel's server
+  // logs so a "calendar shows nothing" report is diagnosable.
+  for (const [label, err] of [
+    ["providers", providersError],
+    ["locations", locationsError],
+    ["availability_rules", rulesError],
+    ["appointment_types", appointmentTypesError],
+    ["appointments", appointmentsError],
+    ["organisations", organisationError],
+  ] as const) {
+    if (err) console.error(`[appointments/calendar] failed to load ${label}`, err);
+  }
 
   const activeProvider =
     (requestedProviderId && providers?.find((p) => p.id === requestedProviderId)) || providers?.[0] || null;
 
   const locationNameById = new Map((locations ?? []).map((location) => [location.id, location.name]));
+  const appointmentTypeNameById = new Map((appointmentTypes ?? []).map((type) => [type.id, type.name]));
   const providerRules = (rules ?? []).filter((rule) => rule.provider_id === activeProvider?.id);
+  const providerAppointments = (appointments ?? []).filter(
+    (appointment) => appointment.provider_id === activeProvider?.id,
+  );
   const timezone = organisation?.default_timezone ?? "Australia/Sydney";
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link href="/appointments" className="text-sm text-brand-teal hover:underline">
-          ← Appointments
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Link href="/appointments" className="text-sm text-brand-teal hover:underline">
+            ← Appointments
+          </Link>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-800 mt-1">Calendar</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            A provider&apos;s weekly hours (light) with actual booked appointments (teal) laid on top.
+          </p>
+        </div>
+        <Link
+          href="/appointments/book"
+          className="shrink-0 rounded-md bg-brand-teal text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"
+        >
+          Book appointment
         </Link>
-        <h1 className="text-xl font-semibold tracking-tight text-slate-800 mt-1">Calendar</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          A read-only preview of a provider&apos;s weekly hours, built from the Availability rules you&apos;ve
-          set up. Bookable appointments aren&apos;t wired up yet — this confirms the grid renders correctly
-          against real data first.
-        </p>
       </div>
 
       {!providers || providers.length === 0 ? (
@@ -93,7 +133,7 @@ export default async function CalendarPage({
             ))}
           </div>
 
-          {providerRules.length === 0 ? (
+          {providerRules.length === 0 && providerAppointments.length === 0 ? (
             <p className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2">
               {activeProvider?.display_name} has no weekly hours set yet. Add some on the{" "}
               <Link href="/appointments/availability" className="underline">
@@ -104,7 +144,9 @@ export default async function CalendarPage({
           ) : (
             <AvailabilityWeekCalendar
               rules={providerRules}
+              appointments={providerAppointments}
               locationNameById={locationNameById}
+              appointmentTypeNameById={appointmentTypeNameById}
               timezone={timezone}
               providerName={activeProvider?.display_name ?? ""}
             />

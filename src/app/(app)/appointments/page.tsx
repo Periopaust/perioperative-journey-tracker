@@ -57,38 +57,58 @@ export default async function AppointmentsPage({
   }
 
   const supabase = await createClient();
-  const [{ count: providerCount }, { count: locationCount }, { count: availabilityCount }] = await Promise.all([
-    supabase
-      .schema("scheduling")
-      .from("providers")
-      .select("id", { count: "exact", head: true }),
-    supabase
-      .schema("scheduling")
-      .from("locations")
-      .select("id", { count: "exact", head: true }),
+  const nowIso = new Date().toISOString();
+  const [
+    { count: providerCount },
+    { count: locationCount },
+    { count: availabilityCount },
+    { count: appointmentTypeCount },
+    { count: upcomingAppointmentCount },
+  ] = await Promise.all([
+    supabase.schema("scheduling").from("providers").select("id", { count: "exact", head: true }),
+    supabase.schema("scheduling").from("locations").select("id", { count: "exact", head: true }),
     supabase
       .schema("scheduling")
       .from("availability_rules")
       .select("id", { count: "exact", head: true })
       .eq("active", true),
+    supabase
+      .schema("scheduling")
+      .from("appointment_types")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true),
+    supabase
+      .schema("scheduling")
+      .from("appointments")
+      .select("id", { count: "exact", head: true })
+      .neq("status", "cancelled")
+      .gte("end_at", nowIso),
   ]);
   const hasAvailability = (availabilityCount ?? 0) > 0;
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight text-slate-800">Appointments</h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Appointments</h1>
+        <Link
+          href="/appointments/book"
+          className="shrink-0 rounded-md bg-brand-teal text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"
+        >
+          Book appointment
+        </Link>
+      </div>
       <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-1">
         <p className="text-sm text-gray-600">
           Signed in as <span className="font-medium text-gray-900">{schedulingProfile.full_name}</span>{" "}
           · <span className="capitalize">{schedulingProfile.role}</span>
         </p>
         <p className="text-sm text-gray-500">
-          The calendar view is a read-only preview for now — booking isn&apos;t wired up yet. Set up
-          your providers, locations, and their weekly hours here first.
+          Set up your providers, locations, appointment types, and weekly hours here, then book and
+          manage appointments from the calendar.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 max-w-3xl">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-3xl">
         <Link
           href="/appointments/providers"
           className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
@@ -104,6 +124,13 @@ export default async function AppointmentsPage({
           <p className="text-xs text-gray-500 mt-1">{locationCount ?? 0} added</p>
         </Link>
         <Link
+          href="/appointments/appointment-types"
+          className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+        >
+          <p className="text-sm font-medium text-gray-900">Appointment types</p>
+          <p className="text-xs text-gray-500 mt-1">{appointmentTypeCount ?? 0} added</p>
+        </Link>
+        <Link
           href="/appointments/availability"
           className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
         >
@@ -115,9 +142,14 @@ export default async function AppointmentsPage({
           className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
         >
           <p className="text-sm font-medium text-gray-900">Calendar</p>
-          <p className="text-xs text-gray-500 mt-1">
-            {hasAvailability ? "Read-only preview" : "Nothing to show yet"}
-          </p>
+          <p className="text-xs text-gray-500 mt-1">{hasAvailability ? "View schedule" : "Nothing to show yet"}</p>
+        </Link>
+        <Link
+          href="/appointments/book"
+          className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+        >
+          <p className="text-sm font-medium text-gray-900">Appointments</p>
+          <p className="text-xs text-gray-500 mt-1">{upcomingAppointmentCount ?? 0} upcoming</p>
         </Link>
       </div>
     </div>
