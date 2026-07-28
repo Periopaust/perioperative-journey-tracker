@@ -27,8 +27,14 @@ export default async function CalendarPage({
 
   const supabase = await createClient();
   const nowIso = new Date().toISOString();
-  const [{ data: providers }, { data: locations }, { data: rules }, { data: appointmentTypes }, { data: appointments }, { data: organisation }] =
-    await Promise.all([
+  const [
+    { data: providers, error: providersError },
+    { data: locations, error: locationsError },
+    { data: rules, error: rulesError },
+    { data: appointmentTypes, error: appointmentTypesError },
+    { data: appointments, error: appointmentsError },
+    { data: organisation, error: organisationError },
+  ] = await Promise.all([
       supabase.schema("scheduling").from("providers").select("id, display_name").order("display_name"),
       supabase.schema("scheduling").from("locations").select("id, name").order("name"),
       supabase
@@ -50,6 +56,21 @@ export default async function CalendarPage({
         .eq("id", schedulingProfile.organisation_id)
         .single(),
     ]);
+
+  // These are non-fatal (the page below already falls back to empty
+  // arrays/defaults for each), but any Postgres/RLS error here would
+  // otherwise fail completely silently — surface it in Vercel's server
+  // logs so a "calendar shows nothing" report is diagnosable.
+  for (const [label, err] of [
+    ["providers", providersError],
+    ["locations", locationsError],
+    ["availability_rules", rulesError],
+    ["appointment_types", appointmentTypesError],
+    ["appointments", appointmentsError],
+    ["organisations", organisationError],
+  ] as const) {
+    if (err) console.error(`[appointments/calendar] failed to load ${label}`, err);
+  }
 
   const activeProvider =
     (requestedProviderId && providers?.find((p) => p.id === requestedProviderId)) || providers?.[0] || null;
