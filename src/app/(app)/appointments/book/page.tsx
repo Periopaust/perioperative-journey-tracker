@@ -43,10 +43,18 @@ export default async function BookAppointmentPage({
     );
   }
 
+  const canManageAppointments = schedulingProfile.role === "admin" || schedulingProfile.role === "reception";
+
   const supabase = await createClient();
   const nowIso = new Date().toISOString();
-  const [{ data: providers }, { data: locations }, { data: appointmentTypes }, { data: appointments }, { data: organisation }] =
-    await Promise.all([
+  const [
+    { data: allProviders },
+    { data: locations },
+    { data: appointmentTypes },
+    { data: appointments },
+    { data: organisation },
+    { data: ownAccessGrants },
+  ] = await Promise.all([
       supabase.schema("scheduling").from("providers").select("id, display_name").order("display_name"),
       supabase.schema("scheduling").from("locations").select("id, name").order("name"),
       supabase
@@ -68,10 +76,27 @@ export default async function BookAppointmentPage({
         .select("default_timezone")
         .eq("id", schedulingProfile.organisation_id)
         .maybeSingle(),
+      schedulingProfile.role === "reception"
+        ? supabase
+            .schema("scheduling")
+            .from("reception_provider_access")
+            .select("provider_id")
+            .eq("profile_id", schedulingProfile.id)
+            .eq("active", true)
+        : Promise.resolve({ data: null }),
     ]);
 
+  // Admin can book against any provider; reception only against ones
+  // they've been granted (scheduling.reception_provider_access) — RLS
+  // enforces this on the actual insert regardless, this just keeps the
+  // dropdown from offering providers reception can't act on anyway.
+  const providers =
+    schedulingProfile.role === "reception"
+      ? (allProviders ?? []).filter((p) => (ownAccessGrants ?? []).some((g) => g.provider_id === p.id))
+      : allProviders;
+
   const timezone = organisation?.default_timezone ?? "Australia/Sydney";
-  const providerNameById = new Map((providers ?? []).map((p) => [p.id, p.display_name]));
+  const providerNameById = new Map((allProviders ?? []).map((p) => [p.id, p.display_name]));
   const locationNameById = new Map((locations ?? []).map((l) => [l.id, l.name]));
   const typeNameById = new Map((appointmentTypes ?? []).map((t) => [t.id, t.name]));
 
@@ -110,7 +135,7 @@ export default async function BookAppointmentPage({
                     {typeNameById.get(appointment.appointment_type_id) ?? "Unknown type"}
                   </p>
                 </div>
-                {schedulingProfile.role === "admin" && (
+                {canManageAppointments && (
                   <form action={cancelAppointment}>
                     <input type="hidden" name="appointment_id" value={appointment.id} />
                     <button type="submit" className="text-red-600 hover:underline text-sm shrink-0">
@@ -126,25 +151,31 @@ export default async function BookAppointmentPage({
         </div>
       </div>
 
-      {schedulingProfile.role === "admin" && (
+      {canManageAppointments && (
         <div className="rounded-lg border border-gray-200 bg-white p-5">
           <h2 className="text-sm font-medium text-gray-900 mb-3">New appointment</h2>
 
           {nothingToBookWith ? (
             <p className="text-xs text-amber-700 bg-amber-50 rounded-md px-3 py-2">
-              You&apos;ll need at least one{" "}
-              <Link href="/appointments/providers" className="underline">
-                provider
-              </Link>
-              ,{" "}
-              <Link href="/appointments/locations" className="underline">
-                location
-              </Link>
-              , and{" "}
-              <Link href="/appointments/appointment-types" className="underline">
-                appointment type
-              </Link>{" "}
-              before you can book something.
+              {schedulingProfile.role === "reception" && !providers?.length ? (
+                "You don't have access to any providers yet — ask an admin to grant it on the Team page."
+              ) : (
+                <>
+                  You&apos;ll need at least one{" "}
+                  <Link href="/appointments/providers" className="underline">
+                    provider
+                  </Link>
+                  ,{" "}
+                  <Link href="/appointments/locations" className="underline">
+                    location
+                  </Link>
+                  , and{" "}
+                  <Link href="/appointments/appointment-types" className="underline">
+                    appointment type
+                  </Link>{" "}
+                  before you can book something.
+                </>
+              )}
             </p>
           ) : (
             <form action={createAppointment} className="space-y-3">

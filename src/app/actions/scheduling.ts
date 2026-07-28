@@ -271,9 +271,15 @@ export async function createAppointmentType(formData: FormData) {
 export async function createAppointment(formData: FormData) {
   const schedulingProfile = await getCurrentSchedulingProfile();
   if (!schedulingProfile) redirect("/appointments");
-  if (schedulingProfile.role !== "admin") {
-    redirect("/appointments/book?error=" + encodeURIComponent("Only an admin can book appointments."));
+  if (schedulingProfile.role !== "admin" && schedulingProfile.role !== "reception") {
+    redirect("/appointments/book?error=" + encodeURIComponent("Only an admin or reception can book appointments."));
   }
+  // Admin can book against any provider in the org; reception can only book
+  // against providers they've been explicitly granted. Both are enforced
+  // again at the database level by RLS (appointments_admin_all /
+  // appointments_reception_granted_all) regardless of what this check does —
+  // this is just what turns a denied insert into a readable error instead of
+  // a raw Postgres one.
 
   const providerId = String(formData.get("provider_id") ?? "").trim();
   const locationId = String(formData.get("location_id") ?? "").trim();
@@ -359,15 +365,16 @@ export async function createAppointment(formData: FormData) {
   redirect("/appointments/book?success=1");
 }
 
-// Admin-only. Soft cancel (status + cancelled_at/cancelled_by), never a hard
-// delete — appointments are a real clinical/booking record, and cancelling
-// also frees the slot for the exclusion constraint (which ignores
+// Admin or reception (for their granted providers, enforced by RLS). Soft
+// cancel (status + cancelled_at/cancelled_by), never a hard delete —
+// appointments are a real clinical/booking record, and cancelling also
+// frees the slot for the exclusion constraint (which ignores
 // status = 'cancelled' rows).
 export async function cancelAppointment(formData: FormData) {
   const schedulingProfile = await getCurrentSchedulingProfile();
   if (!schedulingProfile) redirect("/appointments");
-  if (schedulingProfile.role !== "admin") {
-    redirect("/appointments/book?error=" + encodeURIComponent("Only an admin can cancel appointments."));
+  if (schedulingProfile.role !== "admin" && schedulingProfile.role !== "reception") {
+    redirect("/appointments/book?error=" + encodeURIComponent("Only an admin or reception can cancel appointments."));
   }
 
   const appointmentId = String(formData.get("appointment_id") ?? "").trim();
@@ -392,4 +399,136 @@ export async function cancelAppointment(formData: FormData) {
   revalidatePath("/appointments/book");
   revalidatePath("/appointments/calendar");
   redirect("/appointments/book");
+}
+
+// Admin-only. Adds an existing login (auth.users, shared with the rest of
+// this app) as a scheduling.profiles row with a given role — this is what
+// actually lets someone into the Appointments tab at all. Deliberately does
+// NOT create new accounts or send invite emails; the person needs to already
+// have signed in to this app with that email. Looks the account up via a
+// SECURITY DEFINER function restricted to service_role (see migration
+// scheduling_lookup_auth_user_by_email) since auth.users is never
+// PostgREST-exposed, then inserts the profile with the same service-role
+// client — profiles_admin_write RLS would also allow a normal admin session
+// to do the insert, but the lookup already requires the admin client, so
+// this reuses it for both steps rather than opening two separate clients.
+export async function createTeamMember(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/team?error=" + encodeURIComponent("Only an admin can add team members."));
+  }
+
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const fullName = String(formData.get("full_name") ?? "").trim();
+  const role = String(formData.get("role") ?? "").trim();
+
+  if (!email || !fullName || (role !== "reception" && role !== "admin")) {
+    redirect("/appointments/team?error=" + encodeURIComponent("Please fill in every field with a valid role."));
+  }
+
+  const admin = createAdminClient();
+
+  const { data: foundUserId, error: lookupError } = await admin
+    .schema("scheduling")
+    .rpc("lookup_auth_user_id_by_email", { p_email: email });
+
+  if (lookupError) {
+    console.error(lookupError);
+    redirect("/appointments/team?error=" + encodeURIComponent("Could not look up that email. Please try again."));
+  }
+
+  if (!foundUserId) {
+    redirect(
+      "/appointments/team?error=" +
+        encodeURIComponent(`No account found for ${email} — they need to sign in to the app with that email first, then you can add them here.`),
+    );
+  }
+
+  const { error: insertError } = await admin
+    .schema("scheduling")
+    .from("profiles")
+    .insert({
+      id: foundUserId,
+      organisation_id: schedulingProfile.organisation_id,
+      full_name: fullName,
+      email,
+      role,
+    });
+
+  if (insertError) {
+    console.error(insertError);
+    if (insertError.code === "23505") {
+      redirect("/appointments/team?error=" + encodeURIComponent("That person already has Appointments access."));
+    }
+    redirect("/appointments/team?error=" + encodeURIComponent("Could not add that team member. Please try again."));
+  }
+
+  revalidatePath("/appointments/team");
+  redirect("/appointments/team");
+}
+
+// Admin-only. Grants (or re-activates) a reception profile's access to one
+// provider's appointments — this is what appointments_reception_granted_all
+// (the RLS policy on scheduling.appointments) actually checks. Upsert
+// because the (profile_id, provider_id) pair may already exist, inactive,
+// from a previous revoke.
+export async function grantReceptionAccess(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/team?error=" + encodeURIComponent("Only an admin can manage access."));
+  }
+
+  const profileId = String(formData.get("profile_id") ?? "").trim();
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  if (!profileId || !providerId) redirect("/appointments/team");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("reception_provider_access")
+    .upsert(
+      { profile_id: profileId, provider_id: providerId, granted_by: schedulingProfile.id, active: true },
+      { onConflict: "profile_id,provider_id" },
+    );
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/team?error=" + encodeURIComponent("Could not grant access. Please try again."));
+  }
+
+  revalidatePath("/appointments/team");
+  redirect("/appointments/team");
+}
+
+// Admin-only. Revokes a reception profile's access to one provider —
+// deactivates rather than deletes so the grant history (who granted it,
+// when) is preserved.
+export async function revokeReceptionAccess(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/team?error=" + encodeURIComponent("Only an admin can manage access."));
+  }
+
+  const profileId = String(formData.get("profile_id") ?? "").trim();
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  if (!profileId || !providerId) redirect("/appointments/team");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("reception_provider_access")
+    .update({ active: false })
+    .eq("profile_id", profileId)
+    .eq("provider_id", providerId);
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/team?error=" + encodeURIComponent("Could not revoke access. Please try again."));
+  }
+
+  revalidatePath("/appointments/team");
+  redirect("/appointments/team");
 }
