@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentProfile } from "@/lib/auth";
+import { getCurrentSchedulingProfile } from "@/lib/scheduling/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -58,4 +59,81 @@ export async function bootstrapScheduling(formData: FormData) {
 
   revalidatePath("/appointments");
   redirect("/appointments");
+}
+
+// Admin-only. Runs on the normal session-scoped client (not the service-role
+// admin client) — RLS's existing "locations_admin_write" policy is what
+// actually gates this, so a non-admin session gets rejected by the database
+// itself even if this role check were ever bypassed.
+export async function createLocation(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/locations?error=" + encodeURIComponent("Only an admin can add locations."));
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) {
+    redirect("/appointments/locations?error=" + encodeURIComponent("Location name is required."));
+  }
+  const address = String(formData.get("address") ?? "").trim() || null;
+  const phone = String(formData.get("phone") ?? "").trim() || null;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("locations")
+    .insert({
+      organisation_id: schedulingProfile.organisation_id,
+      name,
+      address,
+      phone,
+    });
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/locations?error=" + encodeURIComponent("Could not add location. Please try again."));
+  }
+
+  revalidatePath("/appointments/locations");
+  redirect("/appointments/locations");
+}
+
+// Admin-only, same RLS-backed pattern as createLocation above.
+export async function createProvider(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/providers?error=" + encodeURIComponent("Only an admin can add providers."));
+  }
+
+  const displayName = String(formData.get("display_name") ?? "").trim();
+  if (!displayName) {
+    redirect("/appointments/providers?error=" + encodeURIComponent("Provider name is required."));
+  }
+  const providerType = String(formData.get("provider_type") ?? "").trim() || null;
+  const defaultLocationId = String(formData.get("default_location_id") ?? "").trim() || null;
+  const slotIntervalRaw = Number(formData.get("slot_interval_minutes"));
+  const slotIntervalMinutes =
+    Number.isFinite(slotIntervalRaw) && slotIntervalRaw > 0 ? Math.round(slotIntervalRaw) : 15;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("providers")
+    .insert({
+      organisation_id: schedulingProfile.organisation_id,
+      display_name: displayName,
+      provider_type: providerType,
+      default_location_id: defaultLocationId,
+      slot_interval_minutes: slotIntervalMinutes,
+    });
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/providers?error=" + encodeURIComponent("Could not add provider. Please try again."));
+  }
+
+  revalidatePath("/appointments/providers");
+  redirect("/appointments/providers");
 }
