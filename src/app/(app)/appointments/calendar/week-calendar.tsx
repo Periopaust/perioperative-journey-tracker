@@ -117,12 +117,26 @@ export function AvailabilityWeekCalendar({
           console.error("[calendar] failed to expand availability rules", rulesError);
         }
 
+        // Schedule-X's own `start`/`end` range values are ZonedDateTime
+        // instances from its own bundled Temporal implementation — not the
+        // app's `temporal-polyfill` import. Calling a *static* comparison
+        // like `Temporal.ZonedDateTime.compare(ours, theirs)` mixes the two
+        // and throws ("Missing timeZone") because our compare() can't read
+        // the internal state of a foreign instance. Reading `.epochMilliseconds`
+        // — a plain getter each instance evaluates on itself — sidesteps that
+        // entirely, so range filtering is done with plain number comparisons.
+        const rangeStartMs = start.epochMilliseconds;
+        const rangeEndMs = end.epochMilliseconds;
+
         for (const appointment of appointments) {
           try {
-            const appointmentStart = Temporal.Instant.from(appointment.start_at).toZonedDateTimeISO(timezone);
-            const appointmentEnd = Temporal.Instant.from(appointment.end_at).toZonedDateTimeISO(timezone);
-            if (Temporal.ZonedDateTime.compare(appointmentEnd, start) < 0) continue;
-            if (Temporal.ZonedDateTime.compare(appointmentStart, end) > 0) continue;
+            const appointmentStartInstant = Temporal.Instant.from(appointment.start_at);
+            const appointmentEndInstant = Temporal.Instant.from(appointment.end_at);
+            if (appointmentEndInstant.epochMilliseconds < rangeStartMs) continue;
+            if (appointmentStartInstant.epochMilliseconds > rangeEndMs) continue;
+
+            const appointmentStart = appointmentStartInstant.toZonedDateTimeISO(timezone);
+            const appointmentEnd = appointmentEndInstant.toZonedDateTimeISO(timezone);
 
             const typeName = appointmentTypeNameById.get(appointment.appointment_type_id);
             const locationName = locationNameById.get(appointment.location_id);
