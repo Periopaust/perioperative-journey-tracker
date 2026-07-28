@@ -137,3 +137,84 @@ export async function createProvider(formData: FormData) {
   revalidatePath("/appointments/providers");
   redirect("/appointments/providers");
 }
+
+// Admin-only, same RLS-backed pattern. Providers will also be able to
+// manage their own rules directly once provider logins exist (RLS policy
+// "availability_rules_provider_own_write" already supports it) — this
+// action just isn't exposed to non-admins in the UI yet.
+export async function createAvailabilityRule(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/availability?error=" + encodeURIComponent("Only an admin can set availability."));
+  }
+
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  const locationId = String(formData.get("location_id") ?? "").trim();
+  const dayOfWeek = Number(formData.get("day_of_week"));
+  const startTime = String(formData.get("start_local_time") ?? "").trim();
+  const endTime = String(formData.get("end_local_time") ?? "").trim();
+
+  if (
+    !providerId ||
+    !locationId ||
+    !startTime ||
+    !endTime ||
+    !Number.isInteger(dayOfWeek) ||
+    dayOfWeek < 0 ||
+    dayOfWeek > 6
+  ) {
+    redirect("/appointments/availability?error=" + encodeURIComponent("Please fill in every field."));
+  }
+  if (endTime <= startTime) {
+    redirect("/appointments/availability?error=" + encodeURIComponent("End time must be after start time."));
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("availability_rules")
+    .insert({
+      provider_id: providerId,
+      location_id: locationId,
+      day_of_week: dayOfWeek,
+      start_local_time: startTime,
+      end_local_time: endTime,
+    });
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/availability?error=" + encodeURIComponent("Could not add availability. Please try again."));
+  }
+
+  revalidatePath("/appointments/availability");
+  redirect("/appointments/availability");
+}
+
+// Admin-only. Hard delete is fine here — availability_rules has no
+// dependents yet (no appointments table exists to reference it).
+export async function deleteAvailabilityRule(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/availability?error=" + encodeURIComponent("Only an admin can remove availability."));
+  }
+
+  const ruleId = String(formData.get("rule_id") ?? "").trim();
+  if (!ruleId) redirect("/appointments/availability");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("availability_rules")
+    .delete()
+    .eq("id", ruleId);
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/availability?error=" + encodeURIComponent("Could not remove availability. Please try again."));
+  }
+
+  revalidatePath("/appointments/availability");
+  redirect("/appointments/availability");
+}
