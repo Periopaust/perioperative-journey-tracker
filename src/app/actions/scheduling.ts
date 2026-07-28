@@ -6,6 +6,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getCurrentSchedulingProfile } from "@/lib/scheduling/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { Temporal } from "temporal-polyfill";
 
 // One-time setup: creates the first scheduling.organisations row and makes
 // the caller its first scheduling admin. Gated on the caller already being
@@ -191,8 +192,9 @@ export async function createAvailabilityRule(formData: FormData) {
   redirect("/appointments/availability");
 }
 
-// Admin-only. Hard delete is fine here — availability_rules has no
-// dependents yet (no appointments table exists to reference it).
+// Admin-only. Hard delete is fine here — nothing references
+// availability_rules.id as a foreign key (appointments is booked against
+// providers/locations directly, not against a specific availability rule).
 export async function deleteAvailabilityRule(formData: FormData) {
   const schedulingProfile = await getCurrentSchedulingProfile();
   if (!schedulingProfile) redirect("/appointments");
@@ -217,4 +219,177 @@ export async function deleteAvailabilityRule(formData: FormData) {
 
   revalidatePath("/appointments/availability");
   redirect("/appointments/availability");
+}
+
+// Admin-only. scheduling.appointment_types already existed in the database
+// from the original Phase 1 migration (with RLS already in place) — this is
+// just the first UI for managing it.
+export async function createAppointmentType(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/appointment-types?error=" + encodeURIComponent("Only an admin can add appointment types."));
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) {
+    redirect("/appointments/appointment-types?error=" + encodeURIComponent("Name is required."));
+  }
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const durationRaw = Number(formData.get("default_duration_minutes"));
+  const defaultDurationMinutes = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.round(durationRaw) : 30;
+  const bookingMode = String(formData.get("booking_mode") ?? "in_person").trim();
+
+  const supabase = await createClient();
+  const { error: appointmentTypeError } = await supabase
+    .schema("scheduling")
+    .from("appointment_types")
+    .insert({
+      organisation_id: schedulingProfile.organisation_id,
+      name,
+      description,
+      default_duration_minutes: defaultDurationMinutes,
+      booking_mode: bookingMode,
+    });
+
+  if (appointmentTypeError) {
+    console.error(appointmentTypeError);
+    redirect("/appointments/appointment-types?error=" + encodeURIComponent("Could not add appointment type. Please try again."));
+  }
+
+  revalidatePath("/appointments/appointment-types");
+  redirect("/appointments/appointment-types");
+}
+
+// Admin-only, direct staff booking (source defaults to 'staff'). Duration is
+// always recomputed server-side from the chosen appointment type's own
+// default_duration_minutes — never trusted from the form — so a tampered
+// hidden field can't be used to under/overstate how long a slot is held.
+// The database's exclusion constraint (appointments_no_overlap) is the real
+// backstop against double-booking; this action just turns that into a
+// readable error instead of a raw Postgres one.
+export async function createAppointment(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/book?error=" + encodeURIComponent("Only an admin can book appointments."));
+  }
+
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  const locationId = String(formData.get("location_id") ?? "").trim();
+  const appointmentTypeId = String(formData.get("appointment_type_id") ?? "").trim();
+  const date = String(formData.get("date") ?? "").trim();
+  const startTime = String(formData.get("start_time") ?? "").trim();
+  const contactName = String(formData.get("contact_name") ?? "").trim();
+  const contactPhone = String(formData.get("contact_phone") ?? "").trim() || null;
+  const contactEmail = String(formData.get("contact_email") ?? "").trim() || null;
+  const reasonForBooking = String(formData.get("reason_for_booking") ?? "").trim() || null;
+
+  if (!providerId || !locationId || !appointmentTypeId || !date || !startTime || !contactName) {
+    redirect("/appointments/book?error=" + encodeURIComponent("Please fill in every required field."));
+  }
+
+  const supabase = await createClient();
+  const [{ data: appointmentType }, { data: organisation }] = await Promise.all([
+    supabase
+      .schema("scheduling")
+      .from("appointment_types")
+      .select("default_duration_minutes")
+      .eq("id", appointmentTypeId)
+      .maybeSingle(),
+    supabase
+      .schema("scheduling")
+      .from("organisations")
+      .select("default_timezone")
+      .eq("id", schedulingProfile.organisation_id)
+      .maybeSingle(),
+  ]);
+
+  if (!appointmentType) {
+    redirect("/appointments/book?error=" + encodeURIComponent("That appointment type could not be found."));
+  }
+
+  const timezone = organisation?.default_timezone ?? "Australia/Sydney";
+  const [hourStr, minuteStr] = startTime.split(":");
+
+  let startAt: Temporal.ZonedDateTime;
+  try {
+    startAt = Temporal.PlainDate.from(date).toZonedDateTime({
+      timeZone: timezone,
+      plainTime: { hour: Number(hourStr), minute: Number(minuteStr) },
+    });
+  } catch {
+    redirect("/appointments/book?error=" + encodeURIComponent("That date or time isn't valid."));
+  }
+  const endAt = startAt.add({ minutes: appointmentType!.default_duration_minutes });
+
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("appointments")
+    .insert({
+      organisation_id: schedulingProfile.organisation_id,
+      provider_id: providerId,
+      location_id: locationId,
+      appointment_type_id: appointmentTypeId,
+      start_at: startAt.toInstant().toString(),
+      end_at: endAt.toInstant().toString(),
+      contact_name: contactName,
+      contact_phone: contactPhone,
+      contact_email: contactEmail,
+      reason_for_booking: reasonForBooking,
+      created_by: schedulingProfile.id,
+    });
+
+  if (error) {
+    console.error(error);
+    // 23P01 = Postgres exclusion_violation — the appointments_no_overlap
+    // constraint rejected this because it overlaps an existing booking for
+    // the same provider.
+    if (error.code === "23P01") {
+      redirect(
+        "/appointments/book?error=" +
+          encodeURIComponent("That time overlaps with an existing appointment for this provider."),
+      );
+    }
+    redirect("/appointments/book?error=" + encodeURIComponent("Could not book that appointment. Please try again."));
+  }
+
+  revalidatePath("/appointments/book");
+  revalidatePath("/appointments/calendar");
+  redirect("/appointments/book?success=1");
+}
+
+// Admin-only. Soft cancel (status + cancelled_at/cancelled_by), never a hard
+// delete — appointments are a real clinical/booking record, and cancelling
+// also frees the slot for the exclusion constraint (which ignores
+// status = 'cancelled' rows).
+export async function cancelAppointment(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/book?error=" + encodeURIComponent("Only an admin can cancel appointments."));
+  }
+
+  const appointmentId = String(formData.get("appointment_id") ?? "").trim();
+  if (!appointmentId) redirect("/appointments/book");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("appointments")
+    .update({
+      status: "cancelled",
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: schedulingProfile.id,
+    })
+    .eq("id", appointmentId);
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/book?error=" + encodeURIComponent("Could not cancel that appointment. Please try again."));
+  }
+
+  revalidatePath("/appointments/book");
+  revalidatePath("/appointments/calendar");
+  redirect("/appointments/book");
 }

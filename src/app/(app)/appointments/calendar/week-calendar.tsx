@@ -16,6 +16,15 @@ export type AvailabilityRuleForCalendar = {
   effective_until: string | null; // "YYYY-MM-DD" | null
 };
 
+export type AppointmentForCalendar = {
+  id: string;
+  location_id: string;
+  appointment_type_id: string;
+  start_at: string; // timestamptz ISO string
+  end_at: string; // timestamptz ISO string
+  contact_name: string;
+};
+
 function toPlainTime(value: string) {
   const [hour, minute] = value.split(":").map(Number);
   return { hour, minute };
@@ -27,14 +36,28 @@ function toIsoWeekday(pgDayOfWeek: number) {
   return pgDayOfWeek === 0 ? 7 : pgDayOfWeek;
 }
 
+// Brand teal (see src/app/globals.css --brand-teal) used to make booked
+// appointments visually distinct from the lighter default-coloured
+// availability blocks they sit on top of.
+const BOOKED_CALENDAR: Record<string, { colorName: string; lightColors: { main: string; container: string; onContainer: string } }> = {
+  booked: {
+    colorName: "booked",
+    lightColors: { main: "#0c6b5c", container: "#ccfbf1", onContainer: "#0c6b5c" },
+  },
+};
+
 export function AvailabilityWeekCalendar({
   rules,
+  appointments,
   locationNameById,
+  appointmentTypeNameById,
   timezone,
   providerName,
 }: {
   rules: AvailabilityRuleForCalendar[];
+  appointments: AppointmentForCalendar[];
   locationNameById: Map<string, string>;
+  appointmentTypeNameById: Map<string, string>;
   timezone: string;
   providerName: string;
 }) {
@@ -43,11 +66,13 @@ export function AvailabilityWeekCalendar({
     defaultView: "week",
     timezone,
     isResponsive: true,
+    calendars: BOOKED_CALENDAR,
     callbacks: {
       // Called on first render and every time the visible range changes
       // (next/prev/today) — recurring weekly rules are expanded into
       // concrete events for whatever range is currently on screen, rather
-      // than materialised up front.
+      // than materialised up front. Booked appointments are already
+      // concrete, so they're just filtered to the visible range.
       fetchEvents: async ({ start, end }) => {
         const events: CalendarEvent[] = [];
         let date = start.toPlainDate();
@@ -75,6 +100,25 @@ export function AvailabilityWeekCalendar({
             });
           }
           date = date.add({ days: 1 });
+        }
+
+        for (const appointment of appointments) {
+          const appointmentStart = Temporal.Instant.from(appointment.start_at).toZonedDateTimeISO(timezone);
+          const appointmentEnd = Temporal.Instant.from(appointment.end_at).toZonedDateTimeISO(timezone);
+          if (Temporal.ZonedDateTime.compare(appointmentEnd, start) < 0) continue;
+          if (Temporal.ZonedDateTime.compare(appointmentStart, end) > 0) continue;
+
+          const typeName = appointmentTypeNameById.get(appointment.appointment_type_id);
+          const locationName = locationNameById.get(appointment.location_id);
+
+          events.push({
+            id: `appointment_${appointment.id}`,
+            start: appointmentStart,
+            end: appointmentEnd,
+            title: typeName ? `${appointment.contact_name} — ${typeName}` : appointment.contact_name,
+            location: locationName,
+            calendarId: "booked",
+          });
         }
 
         return events;
