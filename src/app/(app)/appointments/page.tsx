@@ -57,7 +57,7 @@ export default async function AppointmentsPage({
   }
 
   const supabase = await createClient();
-  const [{ count: providerCount }, { count: locationCount }] = await Promise.all([
+  const [{ count: providerCount }, { count: locationCount }, { count: availabilityCount }] = await Promise.all([
     supabase
       .schema("scheduling")
       .from("providers")
@@ -66,6 +66,11 @@ export default async function AppointmentsPage({
       .schema("scheduling")
       .from("locations")
       .select("id", { count: "exact", head: true }),
+    supabase
+      .schema("scheduling")
+      .from("availability_rules")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true),
   ]);
 
   return (
@@ -78,11 +83,11 @@ export default async function AppointmentsPage({
         </p>
         <p className="text-sm text-gray-500">
           The calendar view (day/week grid and booking) is being built next. Set up your
-          providers and locations here first — the calendar needs at least one of each.
+          providers, locations, and their weekly hours here first.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
+      <div className="grid gap-4 sm:grid-cols-3 max-w-2xl">
         <Link
           href="/appointments/providers"
           className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
@@ -96,6 +101,13 @@ export default async function AppointmentsPage({
         >
           <p className="text-sm font-medium text-gray-900">Locations</p>
           <p className="text-xs text-gray-500 mt-1">{locationCount ?? 0} added</p>
+        </Link>
+        <Link
+          href="/appointments/availability"
+          className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+        >
+          <p className="text-sm font-medium text-gray-900">Availability</p>
+          <p className="text-xs text-gray-500 mt-1">{availabilityCount ?? 0} rules set</p>
         </Link>
       </div>
     </div>
