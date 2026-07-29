@@ -28,12 +28,13 @@ export default async function CalendarPage({
   const supabase = await createClient();
   const nowIso = new Date().toISOString();
   const [
-    { data: providers, error: providersError },
+    { data: allProviders, error: providersError },
     { data: locations, error: locationsError },
     { data: rules, error: rulesError },
     { data: appointmentTypes, error: appointmentTypesError },
     { data: appointments, error: appointmentsError },
     { data: organisation, error: organisationError },
+    { data: ownAccessGrants, error: accessGrantsError },
   ] = await Promise.all([
       supabase.schema("scheduling").from("providers").select("id, display_name").order("display_name"),
       supabase.schema("scheduling").from("locations").select("id, name").order("name"),
@@ -55,6 +56,14 @@ export default async function CalendarPage({
         .select("default_timezone")
         .eq("id", schedulingProfile.organisation_id)
         .single(),
+      schedulingProfile.role === "reception"
+        ? supabase
+            .schema("scheduling")
+            .from("reception_provider_access")
+            .select("provider_id")
+            .eq("profile_id", schedulingProfile.id)
+            .eq("active", true)
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
   // These are non-fatal (the page below already falls back to empty
@@ -68,9 +77,22 @@ export default async function CalendarPage({
     ["appointment_types", appointmentTypesError],
     ["appointments", appointmentsError],
     ["organisations", organisationError],
+    ["reception_provider_access", accessGrantsError],
   ] as const) {
     if (err) console.error(`[appointments/calendar] failed to load ${label}`, err);
   }
+
+  // Admin sees every provider; reception only sees the ones they've been
+  // explicitly granted (scheduling.reception_provider_access) — this is a
+  // UX/defense-in-depth scoping on top of RLS, which already refuses to
+  // return appointment rows for a provider reception hasn't been granted
+  // regardless of what this filter does.
+  const providers =
+    schedulingProfile.role === "reception"
+      ? (allProviders ?? []).filter((p) =>
+          (ownAccessGrants ?? []).some((grant) => grant.provider_id === p.id),
+        )
+      : allProviders;
 
   const activeProvider =
     (requestedProviderId && providers?.find((p) => p.id === requestedProviderId)) || providers?.[0] || null;
@@ -105,15 +127,21 @@ export default async function CalendarPage({
 
       {!providers || providers.length === 0 ? (
         <p className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2">
-          Add a{" "}
-          <Link href="/appointments/providers" className="underline">
-            provider
-          </Link>{" "}
-          and some{" "}
-          <Link href="/appointments/availability" className="underline">
-            weekly availability
-          </Link>{" "}
-          first — there&apos;s nothing to show on the calendar yet.
+          {schedulingProfile.role === "reception" ? (
+            "You don't have access to any providers yet — ask an admin to grant it on the Team page."
+          ) : (
+            <>
+              Add a{" "}
+              <Link href="/appointments/providers" className="underline">
+                provider
+              </Link>{" "}
+              and some{" "}
+              <Link href="/appointments/availability" className="underline">
+                weekly availability
+              </Link>{" "}
+              first — there&apos;s nothing to show on the calendar yet.
+            </>
+          )}
         </p>
       ) : (
         <>
