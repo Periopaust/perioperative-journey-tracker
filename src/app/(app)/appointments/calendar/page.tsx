@@ -27,6 +27,7 @@ export default async function CalendarPage({
 
   const supabase = await createClient();
   const nowIso = new Date().toISOString();
+  const todayIso = nowIso.slice(0, 10);
   const [
     { data: allProviders, error: providersError },
     { data: locations, error: locationsError },
@@ -35,6 +36,7 @@ export default async function CalendarPage({
     { data: appointments, error: appointmentsError },
     { data: organisation, error: organisationError },
     { data: ownAccessGrants, error: accessGrantsError },
+    { data: overrides, error: overridesError },
   ] = await Promise.all([
       supabase.schema("scheduling").from("providers").select("id, display_name").order("display_name"),
       supabase.schema("scheduling").from("locations").select("id, name").order("name"),
@@ -64,6 +66,11 @@ export default async function CalendarPage({
             .eq("profile_id", schedulingProfile.id)
             .eq("active", true)
         : Promise.resolve({ data: null, error: null }),
+      supabase
+        .schema("scheduling")
+        .from("availability_overrides")
+        .select("id, provider_id, override_date, is_available, start_local_time, end_local_time, location_id, reason")
+        .gte("override_date", todayIso),
     ]);
 
   // These are non-fatal (the page below already falls back to empty
@@ -78,6 +85,7 @@ export default async function CalendarPage({
     ["appointments", appointmentsError],
     ["organisations", organisationError],
     ["reception_provider_access", accessGrantsError],
+    ["availability_overrides", overridesError],
   ] as const) {
     if (err) console.error(`[appointments/calendar] failed to load ${label}`, err);
   }
@@ -103,6 +111,7 @@ export default async function CalendarPage({
   const providerAppointments = (appointments ?? []).filter(
     (appointment) => appointment.provider_id === activeProvider?.id,
   );
+  const providerOverrides = (overrides ?? []).filter((override) => override.provider_id === activeProvider?.id);
   const timezone = organisation?.default_timezone ?? "Australia/Sydney";
 
   return (
@@ -161,7 +170,7 @@ export default async function CalendarPage({
             ))}
           </div>
 
-          {providerRules.length === 0 && providerAppointments.length === 0 ? (
+          {providerRules.length === 0 && providerAppointments.length === 0 && providerOverrides.length === 0 ? (
             <p className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2">
               {activeProvider?.display_name} has no weekly hours set yet. Add some on the{" "}
               <Link href="/appointments/availability" className="underline">
@@ -173,6 +182,7 @@ export default async function CalendarPage({
             <AvailabilityWeekCalendar
               rules={providerRules}
               appointments={providerAppointments}
+              overrides={providerOverrides}
               locationNameById={locationNameById}
               appointmentTypeNameById={appointmentTypeNameById}
               timezone={timezone}

@@ -25,6 +25,16 @@ export type AppointmentForCalendar = {
   contact_name: string;
 };
 
+export type AvailabilityOverrideForCalendar = {
+  id: string;
+  override_date: string; // "YYYY-MM-DD"
+  is_available: boolean; // false = blocked/unavailable, true = extra availability
+  start_local_time: string | null; // "HH:MM:SS" | null (null = whole day, only valid when !is_available)
+  end_local_time: string | null;
+  location_id: string | null;
+  reason: string | null;
+};
+
 function toPlainTime(value: string) {
   const [hour, minute] = value.split(":").map(Number);
   return { hour, minute };
@@ -38,17 +48,29 @@ function toIsoWeekday(pgDayOfWeek: number) {
 
 // Brand teal (see src/app/globals.css --brand-teal) used to make booked
 // appointments visually distinct from the lighter default-coloured
-// availability blocks they sit on top of.
-const BOOKED_CALENDAR: Record<string, { colorName: string; lightColors: { main: string; container: string; onContainer: string } }> = {
+// availability blocks they sit on top of. "unavailable"/"extra" give the
+// same treatment to one-off availability_overrides rows.
+const EVENT_CALENDARS: Record<string, { colorName: string; lightColors: { main: string; container: string; onContainer: string } }> = {
   booked: {
     colorName: "booked",
     lightColors: { main: "#0c6b5c", container: "#ccfbf1", onContainer: "#0c6b5c" },
+  },
+  // Time off / leave — a one-off availability_overrides row with is_available = false.
+  unavailable: {
+    colorName: "unavailable",
+    lightColors: { main: "#b91c1c", container: "#fee2e2", onContainer: "#991b1b" },
+  },
+  // A one-off extra session outside normal hours — availability_overrides with is_available = true.
+  extra: {
+    colorName: "extra",
+    lightColors: { main: "#1d4ed8", container: "#dbeafe", onContainer: "#1e40af" },
   },
 };
 
 export function AvailabilityWeekCalendar({
   rules,
   appointments,
+  overrides,
   locationNameById,
   appointmentTypeNameById,
   timezone,
@@ -56,6 +78,7 @@ export function AvailabilityWeekCalendar({
 }: {
   rules: AvailabilityRuleForCalendar[];
   appointments: AppointmentForCalendar[];
+  overrides?: AvailabilityOverrideForCalendar[];
   locationNameById: Map<string, string>;
   appointmentTypeNameById: Map<string, string>;
   timezone: string;
@@ -66,7 +89,7 @@ export function AvailabilityWeekCalendar({
     defaultView: "week",
     timezone,
     isResponsive: true,
-    calendars: BOOKED_CALENDAR,
+    calendars: EVENT_CALENDARS,
     callbacks: {
       // Called on first render and every time the visible range changes
       // (next/prev/today) — recurring weekly rules are expanded into
@@ -87,6 +110,25 @@ export function AvailabilityWeekCalendar({
           const endDate = end.toPlainDate();
 
           while (Temporal.PlainDate.compare(date, endDate) <= 0) {
+            const dateStr = date.toString();
+            const dayOverrides = (overrides ?? []).filter((o) => o.override_date === dateStr);
+            // A whole-day block (no times given) replaces that day's normal
+            // hours entirely, rather than just sitting on top of them —
+            // otherwise the provider would still show as bookable on a day
+            // they're actually on leave.
+            const wholeDayUnavailable = dayOverrides.find((o) => !o.is_available && !o.start_local_time);
+            const partialUnavailable = dayOverrides.filter(
+              (o) => !o.is_available && o.start_local_time && o.end_local_time,
+            );
+            const extraAvailable = dayOverrides.filter((o) => o.is_available && o.start_local_time && o.end_local_time);
+
+            // Tracks the widest span of hours the whole-day override is
+            // actually replacing, so the single "Unavailable" block it
+            // produces is sized/positioned like the rule block(s) it stands
+            // in for, instead of an arbitrary default.
+            let widestUnavailableStart: string | null = null;
+            let widestUnavailableEnd: string | null = null;
+
             for (const rule of rules) {
               try {
                 if (toIsoWeekday(rule.day_of_week) !== date.dayOfWeek) continue;
@@ -98,19 +140,74 @@ export function AvailabilityWeekCalendar({
                   continue;
                 }
 
+                if (wholeDayUnavailable) {
+                  if (!widestUnavailableStart || rule.start_local_time < widestUnavailableStart) {
+                    widestUnavailableStart = rule.start_local_time;
+                  }
+                  if (!widestUnavailableEnd || rule.end_local_time > widestUnavailableEnd) {
+                    widestUnavailableEnd = rule.end_local_time;
+                  }
+                  continue;
+                }
+
                 const locationName = locationNameById.get(rule.location_id);
 
                 events.push({
-                  id: `${rule.id}_${date.toString()}`,
+                  id: `${rule.id}_${dateStr}`,
                   start: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(rule.start_local_time) }),
                   end: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(rule.end_local_time) }),
                   title: providerName,
                   location: locationName,
                 });
               } catch (ruleError) {
-                console.error("[calendar] failed to expand availability rule", rule.id, "for", date.toString(), ruleError);
+                console.error("[calendar] failed to expand availability rule", rule.id, "for", dateStr, ruleError);
               }
             }
+
+            if (wholeDayUnavailable && widestUnavailableStart && widestUnavailableEnd) {
+              try {
+                events.push({
+                  id: `override_${wholeDayUnavailable.id}_${dateStr}`,
+                  start: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(widestUnavailableStart) }),
+                  end: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(widestUnavailableEnd) }),
+                  title: wholeDayUnavailable.reason ? `Unavailable — ${wholeDayUnavailable.reason}` : "Unavailable",
+                  calendarId: "unavailable",
+                });
+              } catch (overrideError) {
+                console.error("[calendar] failed to render unavailable override", wholeDayUnavailable.id, overrideError);
+              }
+            }
+
+            for (const partial of partialUnavailable) {
+              try {
+                events.push({
+                  id: `override_${partial.id}_${dateStr}`,
+                  start: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(partial.start_local_time!) }),
+                  end: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(partial.end_local_time!) }),
+                  title: partial.reason ? `Unavailable — ${partial.reason}` : "Unavailable",
+                  calendarId: "unavailable",
+                });
+              } catch (overrideError) {
+                console.error("[calendar] failed to render unavailable override", partial.id, overrideError);
+              }
+            }
+
+            for (const extra of extraAvailable) {
+              try {
+                const locationName = extra.location_id ? locationNameById.get(extra.location_id) : undefined;
+                events.push({
+                  id: `override_${extra.id}_${dateStr}`,
+                  start: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(extra.start_local_time!) }),
+                  end: date.toZonedDateTime({ timeZone: timezone, plainTime: toPlainTime(extra.end_local_time!) }),
+                  title: extra.reason ? `${providerName} (extra) — ${extra.reason}` : `${providerName} (extra)`,
+                  location: locationName,
+                  calendarId: "extra",
+                });
+              } catch (overrideError) {
+                console.error("[calendar] failed to render extra availability override", extra.id, overrideError);
+              }
+            }
+
             date = date.add({ days: 1 });
           }
         } catch (rulesError) {
@@ -154,7 +251,7 @@ export function AvailabilityWeekCalendar({
           }
         }
 
-        console.log(`[calendar] fetchEvents ${start.toString()} – ${end.toString()}: ${events.length} events (rules=${rules.length}, appointments=${appointments.length})`);
+        console.log(`[calendar] fetchEvents ${start.toString()} – ${end.toString()}: ${events.length} events (rules=${rules.length}, appointments=${appointments.length}, overrides=${(overrides ?? []).length})`);
 
         return events;
       },
