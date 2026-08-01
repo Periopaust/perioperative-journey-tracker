@@ -35,6 +35,14 @@ export type AvailabilityOverrideForCalendar = {
   reason: string | null;
 };
 
+export type PersonalEventForCalendar = {
+  id: string;
+  title: string;
+  start_at: string; // timestamptz ISO string
+  end_at: string; // timestamptz ISO string
+  notes: string | null;
+};
+
 function toPlainTime(value: string) {
   const [hour, minute] = value.split(":").map(Number);
   return { hour, minute };
@@ -65,12 +73,18 @@ const EVENT_CALENDARS: Record<string, { colorName: string; lightColors: { main: 
     colorName: "extra",
     lightColors: { main: "#1d4ed8", container: "#dbeafe", onContainer: "#1e40af" },
   },
+  // A non-appointment calendar block (meeting, admin time, etc.) — scheduling.personal_events.
+  personal: {
+    colorName: "personal",
+    lightColors: { main: "#7e22ce", container: "#f3e8ff", onContainer: "#6b21a8" },
+  },
 };
 
 export function AvailabilityWeekCalendar({
   rules,
   appointments,
   overrides,
+  personalEvents,
   locationNameById,
   appointmentTypeNameById,
   timezone,
@@ -79,6 +93,7 @@ export function AvailabilityWeekCalendar({
   rules: AvailabilityRuleForCalendar[];
   appointments: AppointmentForCalendar[];
   overrides?: AvailabilityOverrideForCalendar[];
+  personalEvents?: PersonalEventForCalendar[];
   locationNameById: Map<string, string>;
   appointmentTypeNameById: Map<string, string>;
   timezone: string;
@@ -251,7 +266,26 @@ export function AvailabilityWeekCalendar({
           }
         }
 
-        console.log(`[calendar] fetchEvents ${start.toString()} – ${end.toString()}: ${events.length} events (rules=${rules.length}, appointments=${appointments.length}, overrides=${(overrides ?? []).length})`);
+        for (const personalEvent of personalEvents ?? []) {
+          try {
+            const eventStartInstant = Temporal.Instant.from(personalEvent.start_at);
+            const eventEndInstant = Temporal.Instant.from(personalEvent.end_at);
+            if (eventEndInstant.epochMilliseconds < rangeStartMs) continue;
+            if (eventStartInstant.epochMilliseconds > rangeEndMs) continue;
+
+            events.push({
+              id: `personal_${personalEvent.id}`,
+              start: eventStartInstant.toZonedDateTimeISO(timezone),
+              end: eventEndInstant.toZonedDateTimeISO(timezone),
+              title: personalEvent.notes ? `${personalEvent.title} — ${personalEvent.notes}` : personalEvent.title,
+              calendarId: "personal",
+            });
+          } catch (personalEventError) {
+            console.error("[calendar] failed to render personal event", personalEvent.id, personalEventError);
+          }
+        }
+
+        console.log(`[calendar] fetchEvents ${start.toString()} – ${end.toString()}: ${events.length} events (rules=${rules.length}, appointments=${appointments.length}, overrides=${(overrides ?? []).length}, personalEvents=${(personalEvents ?? []).length})`);
 
         return events;
       },

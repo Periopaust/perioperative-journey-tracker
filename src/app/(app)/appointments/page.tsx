@@ -65,6 +65,7 @@ export default async function AppointmentsPage({
     { count: appointmentTypeCount },
     { count: upcomingAppointmentCount },
     { count: teamCount },
+    { count: auditEventCount },
   ] = await Promise.all([
     supabase.schema("scheduling").from("providers").select("id", { count: "exact", head: true }),
     supabase.schema("scheduling").from("locations").select("id", { count: "exact", head: true }),
@@ -86,6 +87,9 @@ export default async function AppointmentsPage({
       .gte("end_at", nowIso),
     schedulingProfile.role === "admin"
       ? supabase.schema("scheduling").from("profiles").select("id", { count: "exact", head: true })
+      : Promise.resolve({ count: null }),
+    schedulingProfile.role === "admin"
+      ? supabase.schema("scheduling").from("audit_events").select("id", { count: "exact", head: true })
       : Promise.resolve({ count: null }),
   ]);
   const hasAvailability = (availabilityCount ?? 0) > 0;
@@ -162,6 +166,15 @@ export default async function AppointmentsPage({
           >
             <p className="text-sm font-medium text-gray-900">Team</p>
             <p className="text-xs text-gray-500 mt-1">{teamCount ?? 0} people</p>
+          </Link>
+        )}
+        {schedulingProfile.role === "admin" && (
+          <Link
+            href="/appointments/audit"
+            className="rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-teal transition"
+          >
+            <p className="text-sm font-medium text-gray-900">Audit log</p>
+            <p className="text-xs text-gray-500 mt-1">{auditEventCount ?? 0} entries</p>
           </Link>
         )}
       </div>
