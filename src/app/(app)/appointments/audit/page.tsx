@@ -12,6 +12,8 @@ const ACTION_LABELS: Record<string, string> = {
   "availability_override.deleted": "Removed a one-off availability change",
   "personal_event.created": "Added a personal event",
   "personal_event.deleted": "Removed a personal event",
+  "appointment_type.ai_bookable_enabled": "Turned on public AI booking for an appointment type",
+  "appointment_type.ai_bookable_disabled": "Turned off public AI booking for an appointment type",
 };
 
 function formatTimestamp(value: string, timezone: string) {

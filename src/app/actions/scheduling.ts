@@ -382,6 +382,9 @@ export async function createAppointmentType(formData: FormData) {
   const durationRaw = Number(formData.get("default_duration_minutes"));
   const defaultDurationMinutes = Number.isFinite(durationRaw) && durationRaw > 0 ? Math.round(durationRaw) : 30;
   const bookingMode = String(formData.get("booking_mode") ?? "in_person").trim();
+  // Opt-in only — a new type is never publicly bookable via the AI
+  // assistant unless this checkbox was explicitly ticked when creating it.
+  const aiBookable = formData.get("ai_bookable") === "on";
 
   const supabase = await createClient();
   const { error: appointmentTypeError } = await supabase
@@ -393,12 +396,54 @@ export async function createAppointmentType(formData: FormData) {
       description,
       default_duration_minutes: defaultDurationMinutes,
       booking_mode: bookingMode,
+      ai_bookable: aiBookable,
     });
 
   if (appointmentTypeError) {
     console.error(appointmentTypeError);
     redirect("/appointments/appointment-types?error=" + encodeURIComponent("Could not add appointment type. Please try again."));
   }
+
+  revalidatePath("/appointments/appointment-types");
+  redirect("/appointments/appointment-types");
+}
+
+// Admin-only. Flips whether an existing appointment type may be offered by
+// the public AI booking assistant (/book) — see scheduling_appointment_types_ai_bookable.
+// Logged to the audit trail since this is the one control that changes
+// what an anonymous member of the public can book without staff involved.
+export async function toggleAppointmentTypeAiBookable(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/appointment-types?error=" + encodeURIComponent("Only an admin can change this."));
+  }
+
+  const appointmentTypeId = String(formData.get("appointment_type_id") ?? "").trim();
+  const nextValue = formData.get("next_value") === "true";
+  if (!appointmentTypeId) redirect("/appointments/appointment-types");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("appointment_types")
+    .update({ ai_bookable: nextValue })
+    .eq("id", appointmentTypeId)
+    .eq("organisation_id", schedulingProfile.organisation_id);
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/appointment-types?error=" + encodeURIComponent("Could not update that. Please try again."));
+  }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: nextValue ? "appointment_type.ai_bookable_enabled" : "appointment_type.ai_bookable_disabled",
+    tableName: "appointment_types",
+    recordId: appointmentTypeId,
+    details: null,
+  });
 
   revalidatePath("/appointments/appointment-types");
   redirect("/appointments/appointment-types");
