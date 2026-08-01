@@ -8,6 +8,36 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { Temporal } from "temporal-polyfill";
 
+// Append-only audit trail (scheduling.audit_events) — best-effort logging
+// that runs on the normal session client so RLS's own
+// "audit_events_insert_self" policy is what actually stops anyone from
+// forging an entry as someone else or another organisation. A logging
+// failure is swallowed (just logged to the server console) rather than
+// thrown, since the real action it's recording has already succeeded by
+// the time this runs — an audit-log hiccup should never turn a successful
+// booking/grant/etc. into a user-facing error.
+async function logAuditEvent(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    organisationId: string;
+    actorId: string | null;
+    action: string;
+    tableName: string;
+    recordId?: string | null;
+    details?: Record<string, unknown> | null;
+  },
+) {
+  const { error } = await supabase.schema("scheduling").from("audit_events").insert({
+    organisation_id: params.organisationId,
+    actor_id: params.actorId,
+    action: params.action,
+    table_name: params.tableName,
+    record_id: params.recordId ?? null,
+    details: params.details ?? null,
+  });
+  if (error) console.error("[audit] failed to log event", params.action, error);
+}
+
 // One-time setup: creates the first scheduling.organisations row and makes
 // the caller its first scheduling admin. Gated on the caller already being
 // an admin in this app's own (public.profiles) role system — the scheduling
@@ -262,21 +292,35 @@ export async function createAvailabilityOverride(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.schema("scheduling").from("availability_overrides").insert({
-    provider_id: providerId,
-    override_date: overrideDate,
-    is_available: isAvailable,
-    start_local_time: startTime,
-    end_local_time: endTime,
-    location_id: locationId,
-    reason,
-    created_by: schedulingProfile.id,
-  });
+  const { data: inserted, error } = await supabase
+    .schema("scheduling")
+    .from("availability_overrides")
+    .insert({
+      provider_id: providerId,
+      override_date: overrideDate,
+      is_available: isAvailable,
+      start_local_time: startTime,
+      end_local_time: endTime,
+      location_id: locationId,
+      reason,
+      created_by: schedulingProfile.id,
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error(error);
     redirect("/appointments/availability?error=" + encodeURIComponent("Could not save that change. Please try again."));
   }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "availability_override.created",
+    tableName: "availability_overrides",
+    recordId: inserted?.id ?? null,
+    details: { provider_id: providerId, override_date: overrideDate, is_available: isAvailable },
+  });
 
   revalidatePath("/appointments/availability");
   revalidatePath("/appointments/calendar");
@@ -306,6 +350,14 @@ export async function deleteAvailabilityOverride(formData: FormData) {
     console.error(error);
     redirect("/appointments/availability?error=" + encodeURIComponent("Could not remove that change. Please try again."));
   }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "availability_override.deleted",
+    tableName: "availability_overrides",
+    recordId: overrideId,
+  });
 
   revalidatePath("/appointments/availability");
   revalidatePath("/appointments/calendar");
@@ -420,7 +472,7 @@ export async function createAppointment(formData: FormData) {
   }
   const endAt = startAt.add({ minutes: appointmentType!.default_duration_minutes });
 
-  const { error } = await supabase
+  const { data: inserted, error } = await supabase
     .schema("scheduling")
     .from("appointments")
     .insert({
@@ -435,7 +487,9 @@ export async function createAppointment(formData: FormData) {
       contact_email: contactEmail,
       reason_for_booking: reasonForBooking,
       created_by: schedulingProfile.id,
-    });
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error(error);
@@ -450,6 +504,15 @@ export async function createAppointment(formData: FormData) {
     }
     redirect("/appointments/book?error=" + encodeURIComponent("Could not book that appointment. Please try again."));
   }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "appointment.created",
+    tableName: "appointments",
+    recordId: inserted?.id ?? null,
+    details: { contact_name: contactName, provider_id: providerId, start_at: startAt.toInstant().toString() },
+  });
 
   revalidatePath("/appointments/book");
   revalidatePath("/appointments/calendar");
@@ -486,6 +549,14 @@ export async function cancelAppointment(formData: FormData) {
     console.error(error);
     redirect("/appointments/book?error=" + encodeURIComponent("Could not cancel that appointment. Please try again."));
   }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "appointment.cancelled",
+    tableName: "appointments",
+    recordId: appointmentId,
+  });
 
   revalidatePath("/appointments/book");
   revalidatePath("/appointments/calendar");
@@ -555,6 +626,19 @@ export async function createTeamMember(formData: FormData) {
     redirect("/appointments/team?error=" + encodeURIComponent("Could not add that team member. Please try again."));
   }
 
+  // Logged with the normal session client (not the service-role admin
+  // client used above) so RLS's audit_events_insert_self policy applies —
+  // consistent with every other audit entry in this file.
+  const supabase = await createClient();
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "team_member.added",
+    tableName: "profiles",
+    recordId: foundUserId,
+    details: { email, full_name: fullName, role },
+  });
+
   revalidatePath("/appointments/team");
   redirect("/appointments/team");
 }
@@ -589,6 +673,15 @@ export async function grantReceptionAccess(formData: FormData) {
     redirect("/appointments/team?error=" + encodeURIComponent("Could not grant access. Please try again."));
   }
 
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "reception_access.granted",
+    tableName: "reception_provider_access",
+    recordId: profileId,
+    details: { provider_id: providerId },
+  });
+
   revalidatePath("/appointments/team");
   redirect("/appointments/team");
 }
@@ -620,6 +713,128 @@ export async function revokeReceptionAccess(formData: FormData) {
     redirect("/appointments/team?error=" + encodeURIComponent("Could not revoke access. Please try again."));
   }
 
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "reception_access.revoked",
+    tableName: "reception_provider_access",
+    recordId: profileId,
+    details: { provider_id: providerId },
+  });
+
   revalidatePath("/appointments/team");
   redirect("/appointments/team");
+}
+
+// Admin-only, same "not yet exposed to providers themselves" caveat as
+// availability rules/overrides (RLS's personal_events_provider_own_write
+// is already there for later). A specific, concrete time block on a
+// provider's calendar for something that isn't a patient appointment — a
+// meeting, CME day, admin time — shown on the calendar the same way a
+// booked appointment is, rather than as an availability status change.
+export async function createPersonalEvent(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/calendar?error=" + encodeURIComponent("Only an admin can add personal events."));
+  }
+
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  const date = String(formData.get("date") ?? "").trim();
+  const startTime = String(formData.get("start_local_time") ?? "").trim();
+  const endTime = String(formData.get("end_local_time") ?? "").trim();
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  if (!providerId || !title || !date || !startTime || !endTime) {
+    redirect("/appointments/calendar?error=" + encodeURIComponent("Please fill in every field."));
+  }
+  if (endTime <= startTime) {
+    redirect("/appointments/calendar?error=" + encodeURIComponent("End time must be after start time."));
+  }
+
+  const supabase = await createClient();
+  const { data: organisation } = await supabase
+    .schema("scheduling")
+    .from("organisations")
+    .select("default_timezone")
+    .eq("id", schedulingProfile.organisation_id)
+    .maybeSingle();
+  const timezone = organisation?.default_timezone ?? "Australia/Sydney";
+
+  let startAt: Temporal.ZonedDateTime;
+  let endAt: Temporal.ZonedDateTime;
+  try {
+    const [startHour, startMinute] = startTime.split(":").map(Number);
+    const [endHour, endMinute] = endTime.split(":").map(Number);
+    const plainDate = Temporal.PlainDate.from(date);
+    startAt = plainDate.toZonedDateTime({ timeZone: timezone, plainTime: { hour: startHour, minute: startMinute } });
+    endAt = plainDate.toZonedDateTime({ timeZone: timezone, plainTime: { hour: endHour, minute: endMinute } });
+  } catch {
+    redirect("/appointments/calendar?error=" + encodeURIComponent("That date or time isn't valid."));
+  }
+
+  const { data: inserted, error } = await supabase
+    .schema("scheduling")
+    .from("personal_events")
+    .insert({
+      provider_id: providerId,
+      title,
+      start_at: startAt!.toInstant().toString(),
+      end_at: endAt!.toInstant().toString(),
+      notes,
+      created_by: schedulingProfile.id,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/calendar?error=" + encodeURIComponent("Could not add that event. Please try again."));
+  }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "personal_event.created",
+    tableName: "personal_events",
+    recordId: inserted?.id ?? null,
+    details: { provider_id: providerId, title },
+  });
+
+  revalidatePath("/appointments/calendar");
+  redirect("/appointments/calendar?provider=" + providerId);
+}
+
+// Admin-only. Hard delete is fine here — nothing references
+// personal_events.id as a foreign key.
+export async function deletePersonalEvent(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/calendar?error=" + encodeURIComponent("Only an admin can remove personal events."));
+  }
+
+  const eventId = String(formData.get("event_id") ?? "").trim();
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  if (!eventId) redirect("/appointments/calendar");
+
+  const supabase = await createClient();
+  const { error } = await supabase.schema("scheduling").from("personal_events").delete().eq("id", eventId);
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/calendar?error=" + encodeURIComponent("Could not remove that event. Please try again."));
+  }
+
+  await logAuditEvent(supabase, {
+    organisationId: schedulingProfile.organisation_id,
+    actorId: schedulingProfile.id,
+    action: "personal_event.deleted",
+    tableName: "personal_events",
+    recordId: eventId,
+  });
+
+  revalidatePath("/appointments/calendar");
+  redirect(providerId ? "/appointments/calendar?provider=" + providerId : "/appointments/calendar");
 }
