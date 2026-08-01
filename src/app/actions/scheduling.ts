@@ -221,6 +221,97 @@ export async function deleteAvailabilityRule(formData: FormData) {
   redirect("/appointments/availability");
 }
 
+// Admin-only, same pattern as createAvailabilityRule — a one-off exception
+// to a provider's weekly hours for a single date: either blocking time off
+// (leave the times blank for the whole day, or set a time range for part
+// of it) or adding extra availability outside their normal hours (which
+// requires a time range and a location, since "extra availability" with no
+// hours doesn't mean anything).
+export async function createAvailabilityOverride(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/availability?error=" + encodeURIComponent("Only an admin can set availability."));
+  }
+
+  const providerId = String(formData.get("provider_id") ?? "").trim();
+  const overrideDate = String(formData.get("override_date") ?? "").trim();
+  const isAvailable = String(formData.get("kind") ?? "") === "extra";
+  const startTime = String(formData.get("start_local_time") ?? "").trim() || null;
+  const endTime = String(formData.get("end_local_time") ?? "").trim() || null;
+  const locationId = String(formData.get("location_id") ?? "").trim() || null;
+  const reason = String(formData.get("reason") ?? "").trim() || null;
+
+  if (!providerId || !overrideDate) {
+    redirect("/appointments/availability?error=" + encodeURIComponent("Please choose a provider and date."));
+  }
+  if ((startTime && !endTime) || (!startTime && endTime)) {
+    redirect(
+      "/appointments/availability?error=" +
+        encodeURIComponent("Please set both a start and end time, or leave both blank for the whole day."),
+    );
+  }
+  if (startTime && endTime && endTime <= startTime) {
+    redirect("/appointments/availability?error=" + encodeURIComponent("End time must be after start time."));
+  }
+  if (isAvailable && (!startTime || !endTime || !locationId)) {
+    redirect(
+      "/appointments/availability?error=" +
+        encodeURIComponent("Extra availability needs a start time, end time, and location."),
+    );
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.schema("scheduling").from("availability_overrides").insert({
+    provider_id: providerId,
+    override_date: overrideDate,
+    is_available: isAvailable,
+    start_local_time: startTime,
+    end_local_time: endTime,
+    location_id: locationId,
+    reason,
+    created_by: schedulingProfile.id,
+  });
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/availability?error=" + encodeURIComponent("Could not save that change. Please try again."));
+  }
+
+  revalidatePath("/appointments/availability");
+  revalidatePath("/appointments/calendar");
+  redirect("/appointments/availability");
+}
+
+// Admin-only. Hard delete is fine here for the same reason as
+// deleteAvailabilityRule — nothing references availability_overrides.id.
+export async function deleteAvailabilityOverride(formData: FormData) {
+  const schedulingProfile = await getCurrentSchedulingProfile();
+  if (!schedulingProfile) redirect("/appointments");
+  if (schedulingProfile.role !== "admin") {
+    redirect("/appointments/availability?error=" + encodeURIComponent("Only an admin can remove availability changes."));
+  }
+
+  const overrideId = String(formData.get("override_id") ?? "").trim();
+  if (!overrideId) redirect("/appointments/availability");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .schema("scheduling")
+    .from("availability_overrides")
+    .delete()
+    .eq("id", overrideId);
+
+  if (error) {
+    console.error(error);
+    redirect("/appointments/availability?error=" + encodeURIComponent("Could not remove that change. Please try again."));
+  }
+
+  revalidatePath("/appointments/availability");
+  revalidatePath("/appointments/calendar");
+  redirect("/appointments/availability");
+}
+
 // Admin-only. scheduling.appointment_types already existed in the database
 // from the original Phase 1 migration (with RLS already in place) — this is
 // just the first UI for managing it.
