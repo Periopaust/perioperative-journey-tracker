@@ -116,6 +116,20 @@ export default async function AppointmentsPage({
         </p>
       </div>
 
+      {schedulingProfile.role === "admin" && (
+        <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-1">
+          <p className="text-sm font-medium text-gray-900">Public AI booking assistant</p>
+          <p className="text-xs text-gray-500">
+            Share <Link href="/book" className="text-brand-teal underline">/book</Link> with patients so they
+            can book themselves — it only offers appointment types you&apos;ve turned on for it (see{" "}
+            <Link href="/appointments/appointment-types" className="underline">
+              Appointment types
+            </Link>
+            ).
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-3xl">
         <Link
           href="/appointments/providers"

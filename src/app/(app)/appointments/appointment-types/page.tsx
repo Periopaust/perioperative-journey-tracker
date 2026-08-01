@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getCurrentSchedulingProfile } from "@/lib/scheduling/auth";
 import { createClient } from "@/lib/supabase/server";
-import { createAppointmentType } from "@/app/actions/scheduling";
+import { createAppointmentType, toggleAppointmentTypeAiBookable } from "@/app/actions/scheduling";
 
 const BOOKING_MODES = [
   { value: "in_person", label: "In person" },
@@ -37,7 +37,7 @@ export default async function AppointmentTypesPage({
   const { data: appointmentTypes } = await supabase
     .schema("scheduling")
     .from("appointment_types")
-    .select("id, name, description, default_duration_minutes, booking_mode")
+    .select("id, name, description, default_duration_minutes, booking_mode, ai_bookable")
     .eq("active", true)
     .order("name");
 
@@ -62,12 +62,31 @@ export default async function AppointmentTypesPage({
       <div className="rounded-lg border border-gray-200 bg-white divide-y divide-gray-100">
         {appointmentTypes && appointmentTypes.length > 0 ? (
           appointmentTypes.map((type) => (
-            <div key={type.id} className="px-5 py-3">
-              <p className="text-sm font-medium text-gray-900">{type.name}</p>
-              <p className="text-xs text-gray-500">
-                {type.default_duration_minutes} min · {bookingModeLabel(type.booking_mode)}
-              </p>
-              {type.description && <p className="text-xs text-gray-500 mt-1">{type.description}</p>}
+            <div key={type.id} className="px-5 py-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{type.name}</p>
+                <p className="text-xs text-gray-500">
+                  {type.default_duration_minutes} min · {bookingModeLabel(type.booking_mode)}
+                </p>
+                {type.description && <p className="text-xs text-gray-500 mt-1">{type.description}</p>}
+              </div>
+              {schedulingProfile.role === "admin" && (
+                <form action={toggleAppointmentTypeAiBookable} className="shrink-0 text-right">
+                  <input type="hidden" name="appointment_type_id" value={type.id} />
+                  <input type="hidden" name="next_value" value={(!type.ai_bookable).toString()} />
+                  <button
+                    type="submit"
+                    className={`text-xs rounded-full px-2.5 py-1 border transition ${
+                      type.ai_bookable
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:border-emerald-400"
+                        : "bg-gray-50 text-gray-500 border-gray-200 hover:border-gray-400"
+                    }`}
+                    title={type.ai_bookable ? "Bookable via the public AI assistant — click to turn off" : "Not bookable via the public AI assistant — click to turn on"}
+                  >
+                    {type.ai_bookable ? "AI-bookable ✓" : "AI-bookable off"}
+                  </button>
+                </form>
+              )}
             </div>
           ))
         ) : (
@@ -122,6 +141,10 @@ export default async function AppointmentTypesPage({
                 </select>
               </label>
             </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" name="ai_bookable" className="rounded border-gray-300" />
+              Allow booking via the public AI assistant (/book)
+            </label>
             <button
               type="submit"
               className="rounded-md bg-brand-teal text-white px-4 py-2 text-sm font-medium hover:opacity-90 transition"

@@ -29,7 +29,16 @@ export async function updateSession(request: NextRequest) {
 
   const isAuthRoute = request.nextUrl.pathname.startsWith("/login");
 
-  if (!user && !isAuthRoute) {
+  // Public, unauthenticated AI booking assistant (src/app/book/page.tsx)
+  // and its API route — the one deliberate hole in an otherwise fully
+  // logged-in-only app. Keep this narrow: an exact "/book" path (plus its
+  // own subpaths) and the specific API prefix it calls, nothing broader.
+  const isPublicBookingRoute =
+    request.nextUrl.pathname === "/book" ||
+    request.nextUrl.pathname.startsWith("/book/") ||
+    request.nextUrl.pathname.startsWith("/api/public-booking/");
+
+  if (!user && !isAuthRoute && !isPublicBookingRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
